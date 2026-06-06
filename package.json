@@ -4,7 +4,8 @@
   "description": "My Lingo Claude Code plugin — prompt optimization and language learning",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:integration": "node --test tests/integration/integration.test.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.1 MVP 已完成**（88 单元测试通过，Phase 0–5 全部实现）|
+| 当前阶段 | **v0.3 已完成**（182 单元测试 + 11 集成测试通过，SRS / 课程生成 / 画像 / 导出全部实现）|
 
 ---
 
@@ -37,25 +37,45 @@ my-lingo-claude/
 │       ├── setup.md             # /my-lingo:setup
 │       ├── status.md            # /my-lingo:status
 │       ├── last.md              # /my-lingo:last
-│       └── mode.md              # /my-lingo:mode
+│       ├── mode.md              # /my-lingo:mode
+│       ├── setlang.md           # /my-lingo:setlang（切换语言空间）
+│       ├── recent.md            # /my-lingo:recent（近期纠错）
+│       ├── errors.md            # /my-lingo:errors（错误摘要）
+│       ├── purge.md             # /my-lingo:purge（清除旧数据）
+│       ├── vocab.md             # /my-lingo:vocab（词汇表）
+│       ├── sentences.md         # /my-lingo:sentences（句式表）
+│       ├── review.md            # /my-lingo:review（SRS 复习）
+│       ├── lesson.md            # /my-lingo:lesson（AI 课程生成）
+│       ├── profile.md           # /my-lingo:profile（学习画像）
+│       └── export.md            # /my-lingo:export（导出 Markdown）
 ├── hooks/
 │   └── hooks.json               # UserPromptSubmit + SessionEnd 配置
 ├── scripts/
 │   ├── user-prompt-submit.mjs   # Hook 主入口
 │   ├── session-end.mjs          # 会话结束钩子
+│   ├── generate-lesson.mjs      # 课程生成脚本（被 lesson.md 调用）
 │   └── lib/
 │       ├── detect.mjs           # 语言检测 + 跳过逻辑
-│       ├── config.mjs           # 4 层配置合并
-│       ├── storage.mjs          # JSONL 读写工具
+│       ├── config.mjs           # 4 层配置合并（含语言空间）
+│       ├── storage.mjs          # JSONL 读写工具（含 SRS 扩展）
 │       ├── api.mjs              # curl 调用 + 熔断器
 │       ├── prompts.mjs          # Prompt 构建
-│       └── privacy.mjs          # 脱敏处理
+│       ├── privacy.mjs          # 脱敏处理
+│       ├── analysis.mjs         # SessionEnd 学习分析
+│       ├── srs.mjs              # SRS 纯函数（computeNextReview / getItemsDue）
+│       └── lesson.mjs           # 课程纯函数（buildLessonMessages / parseLessonResponse）
 ├── tests/
 │   ├── detect.test.mjs
 │   ├── prompts.test.mjs
 │   ├── privacy.test.mjs
 │   ├── config.test.mjs
-│   └── storage.test.mjs
+│   ├── storage.test.mjs
+│   ├── srs.test.mjs
+│   ├── lesson.test.mjs
+│   └── integration/
+│       ├── mock-server.mjs      # 本地 HTTP mock server
+│       ├── helpers.mjs          # 临时目录、配置写入封装
+│       └── integration.test.mjs # 11 个集成测试用例（PT-001 ~ PT-012）
 └── dev_docs/                    # 本文档体系所在位置
 ```
 
@@ -78,6 +98,9 @@ my-lingo-claude/
 | 实现或修改 `privacy.mjs`、脱敏规则、安全设计 | [`09-privacy-security.md`](./09-privacy-security.md) |
 | 了解 MVP 范围、实现阶段划分、风险登记、验收清单 | [`10-mvp-roadmap.md`](./10-mvp-roadmap.md) |
 | 查询某个关键架构决策的背景和理由 | [`00-decisions.md`](./00-decisions.md) |
+| 运行集成测试、了解各用例原理、查看与 PENDING_TESTS.md 的差异 | [`11-integration-tests.md`](./11-integration-tests.md) |
+| 启动 v0.2 实现（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`../IMPLEMENTATION_PLAN_V0.2.md`](../IMPLEMENTATION_PLAN_V0.2.md) |
+| 启动 v0.3 实现（SRS 复习 + 课程生成 + 画像 + 导出）| [`../IMPLEMENTATION_PLAN_V0.3.md`](../IMPLEMENTATION_PLAN_V0.3.md) |
 
 ---
 
@@ -146,11 +169,11 @@ Claude 会话结束
 
 ---
 
-## MVP 实现状态（v0.1）
+## 实现状态（v0.3 完成）
 
-当前状态：**v0.1 MVP 已完成实现，88 单元测试通过**
+当前状态：**v0.3 全部完成，182 单元测试 + 11 集成测试通过**
 
-### 实现阶段
+### v0.1 实现阶段（MVP）
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -160,6 +183,23 @@ Claude 会话结束
 | Phase 3 | `config.mjs`（4 层配置合并）+ `setup.md` + `mode.md` | ✅ 已完成 |
 | Phase 4 | `privacy.mjs`（脱敏规则） | ✅ 已完成 |
 | Phase 5 | 完善 `status.md` + `last.md` + 单元测试 + `session-end.mjs` | ✅ 已完成 |
+
+### v0.2 实现阶段（多语言空间 + 学习分析）
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase 1 | `config.mjs` 语言空间支持 + `setlang.md` + `addSpace/removeSpace` 命令 | ✅ 已完成 |
+| Phase 2 | `analysis.mjs` SessionEnd 学习分析 + `storage.mjs` corrections/items 扩展（PT-009/PT-010） | ✅ 已完成 |
+| Phase 3 | 学习命令：`recent.md` / `errors.md` / `purge.md` | ✅ 已完成 |
+
+### v0.3 实现阶段（SRS + 课程生成 + 画像 + 导出）
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase 1 | `srs.mjs` 纯函数 + `storage.mjs` SRS 扩展 + `vocab.md` / `sentences.md` / `review.md` | ✅ 已完成 |
+| Phase 2 | `lesson.mjs` 纯函数 + `generate-lesson.mjs` + `lesson.md` + PT-011/PT-012 集成测试 | ✅ 已完成 |
+| Phase 3 | `profile.md` 学习画像（30 天统计 + 趋势 + 错误模式）| ✅ 已完成 |
+| Phase 4 | `export.md` Markdown 导出（按 space / 月份范围）| ✅ 已完成 |
 
 ### MVP 必须实现的功能（10 项）
 

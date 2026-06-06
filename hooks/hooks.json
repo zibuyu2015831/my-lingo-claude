@@ -1,0 +1,29 @@
+{
+  "description": "My Lingo — prompt optimization and language learning for Claude Code.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "description": "Content-based filtering is impossible at the hook-config layer, so all filtering happens inside the script. The script skips: (1) slash commands starting with '/', (2) shell commands starting with '!' — EXCEPT '!raw' which is a My Lingo escape prefix handled before skip logic, (3) prompts under 8 chars, (4) pure code blocks, (5) URL/shell prefixes.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt-submit.mjs\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-end.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

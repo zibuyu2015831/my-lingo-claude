@@ -1,0 +1,53 @@
+{
+  "name": "my-lingo",
+  "version": "0.1.0",
+  "description": "A personal Claude Code language-learning and prompt-enhancement plugin. Optimizes your prompts to English and builds personalized language learning materials from your real coding interactions.",
+  "author": "Zane",
+  "commands": "./commands",
+  "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "api_base_url": {
+      "type": "string",
+      "title": "API Base URL",
+      "description": "OpenAI-compatible API base URL (e.g., https://api.openai.com/v1).",
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "API key for the external optimization model. Displayed in Claude Code UI only — the hook script reads it from config.json written by /my-lingo:setup.",
+      "sensitive": true,
+      "required": true
+    },
+    "model_fast": {
+      "type": "string",
+      "title": "Fast Model",
+      "description": "Model for synchronous prompt optimization (e.g., gpt-4o-mini, deepseek-chat).",
+      "required": true
+    },
+    "model_deep": {
+      "type": "string",
+      "title": "Deep Model",
+      "description": "Model for lesson and profile generation. Defaults to model_fast if not set.",
+      "required": false
+    },
+    "native_language": {
+      "type": "string",
+      "title": "Native Language",
+      "description": "Your native language code for explanations (e.g., zh-CN, ja, ko).",
+      "default": "zh-CN"
+    },
+    "execution_mode": {
+      "type": "string",
+      "title": "Default Execution Mode",
+      "description": "english_optimized, original, original_with_english_context, or off.",
+      "default": "english_optimized"
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "title": "API Timeout (seconds)",
+      "description": "Maximum time to wait for API response before falling back.",
+      "default": 8
+    }
+  }
+}

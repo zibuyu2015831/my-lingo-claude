@@ -1,0 +1,113 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { detectLanguage, shouldSkip, detectMode } from '../scripts/lib/detect.mjs'
+
+// ── detectLanguage shape ────────────────────────────────────────────────────
+
+test('detectLanguage returns valid shape', () => {
+  const result = detectLanguage('hello world')
+  assert.equal(typeof result.lang, 'string')
+  assert.ok(['en', 'non-english'].includes(result.lang))
+  assert.equal(typeof result.ratio, 'number')
+  assert.ok(result.ratio >= 0 && result.ratio <= 100)
+})
+
+test('detectLanguage: pure English is en', () => {
+  const { lang, ratio } = detectLanguage('Review this function for potential issues')
+  assert.equal(lang, 'en')
+  assert.ok(ratio >= 85)
+})
+
+test('detectLanguage: Chinese is non-english', () => {
+  const { lang, ratio } = detectLanguage('检查这个代码')
+  assert.equal(lang, 'non-english')
+  assert.ok(ratio < 85)
+})
+
+test('detectLanguage: mixed Chinese+English is non-english', () => {
+  const { lang } = detectLanguage('把 auth module 重构一下')
+  assert.equal(lang, 'non-english')
+})
+
+test('detectLanguage: empty string returns en without throwing', () => {
+  const result = detectLanguage('')
+  assert.equal(typeof result.lang, 'string')
+  assert.ok(['en', 'non-english'].includes(result.lang))
+})
+
+test('detectLanguage: whitespace-only returns en without throwing', () => {
+  const result = detectLanguage('   ')
+  assert.ok(['en', 'non-english'].includes(result.lang))
+})
+
+// ── shouldSkip ──────────────────────────────────────────────────────────────
+
+test('shouldSkip: slash command → true', () => {
+  assert.equal(shouldSkip('/my-lingo:status'), true)
+})
+
+test('shouldSkip: short prompt "ok" → true', () => {
+  assert.equal(shouldSkip('ok'), true)
+})
+
+test('shouldSkip: URL → true', () => {
+  assert.equal(shouldSkip('https://example.com'), true)
+})
+
+test('shouldSkip: npm command → true', () => {
+  assert.equal(shouldSkip('npm install lodash'), true)
+})
+
+test('shouldSkip: code block → true', () => {
+  assert.equal(shouldSkip('```js\nfoo()'), true)
+})
+
+test('shouldSkip: ! prefix → true (shell command)', () => {
+  // !raw is intercepted by caller before shouldSkip; this confirms ! itself skips
+  assert.equal(shouldSkip('!raw test this please'), true)
+})
+
+test('shouldSkip: normal English prompt → false', () => {
+  assert.equal(shouldSkip('Review this function for potential issues'), false)
+})
+
+test('shouldSkip: normal Chinese prompt → false', () => {
+  assert.equal(shouldSkip('检查这个代码有没有问题'), false)
+})
+
+// ── detectMode ──────────────────────────────────────────────────────────────
+
+test('detectMode: Chinese → non-english mode', () => {
+  const result = detectMode('检查这个代码有没有问题')
+  assert.equal(result.mode, 'non-english')
+})
+
+test('detectMode: English → english mode', () => {
+  const result = detectMode('Review this function for potential issues')
+  assert.equal(result.mode, 'english')
+})
+
+test('detectMode: slash command → skip mode', () => {
+  const result = detectMode('/my-lingo:status')
+  assert.equal(result.mode, 'skip')
+})
+
+test('detectMode: short prompt → skip mode', () => {
+  const result = detectMode('ok')
+  assert.equal(result.mode, 'skip')
+})
+
+test('detectMode: URL → skip mode', () => {
+  const result = detectMode('https://example.com')
+  assert.equal(result.mode, 'skip')
+})
+
+test('detectMode: npm command → skip mode', () => {
+  const result = detectMode('npm install lodash')
+  assert.equal(result.mode, 'skip')
+})
+
+test('detectMode: mixed Chinese+English → non-english', () => {
+  const result = detectMode('把 auth module 重构一下')
+  assert.equal(result.mode, 'non-english')
+})

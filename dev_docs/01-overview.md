@@ -121,4 +121,4 @@ My Lingo **不**应该变成：
 | v0.1 MVP | 插件骨架 + 同步 Prompt 优化 + JSONL 存储 + 基础命令 |
 | v0.2 | 多语言空间 + SessionEnd 学习分析 + 错误画像 |
 | v0.3 | 课程生成 + 简化 SRS + 词汇提取 |
-| v1.0 | SQLite 迁移 + Wrapper 模式 + 完整学习体系 |
+| v1.0 | SQLite 迁移 + 完整学习体系 + 数据导出 |

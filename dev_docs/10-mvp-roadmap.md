@@ -51,7 +51,6 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 | 课程生成（`/my-lingo:lesson`）| 需要 learning items 积累 |
 | 用户画像（`/my-lingo:profile`）| 需要足够历史数据 |
 | SRS 复习系统 | v0.3 |
-| Wrapper 模式 | v1.0 |
 
 ---
 
@@ -185,11 +184,10 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 
 ---
 
-### v1.0 里程碑：SQLite 与 Wrapper
+### v1.0 里程碑：SQLite 与完整导出
 
 **新增功能**：
 - SQLite 迁移（从 JSONL 迁移）
-- Wrapper 模式（`my-lingo claude` / `mlingo`）
 - 完整导出（`/my-lingo:export`）
 
 ---
@@ -205,7 +203,7 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 **应对**：
 1. 调整 additionalContext 指令强度（测试不同措辞）
 2. 添加 `preview` 模式让用户验证
-3. 长期方案：Wrapper 模式（v1.0）
+3. 引导用户在必要时使用 `!raw` 前缀跳过优化，手动输入英文
 
 ---
 

@@ -83,7 +83,9 @@ My Lingo **不**应该变成：
 
 ---
 
-## 6. 插件信息
+## 6. 插件信息与命名规范
+
+### 基本信息
 
 | 字段 | 值 |
 |------|-----|
@@ -94,6 +96,21 @@ My Lingo **不**应该变成：
 | 默认语言空间 | English |
 | 实现语言 | Node.js |
 | 存储方案 | JSONL（MVP），SQLite（v1.0+）|
+
+### 命名规范
+
+不同场景使用不同形式，不可混用：
+
+| 场景 | 形式 | 示例 |
+|------|------|------|
+| 用户界面、文档标题、对话中提及 | `My Lingo`（首字母大写 + 空格）| "My Lingo is a plugin..." |
+| plugin.json `name`、命令前缀、数据目录 | `my-lingo`（全小写 kebab-case）| `/my-lingo:status`、`$CLAUDE_PLUGIN_DATA/my-lingo/` |
+| Git 仓库名、package.json `name` | `my-lingo-claude`（加平台后缀）| `github.com/xxx/my-lingo-claude` |
+| JS 代码变量、函数前缀 | `myLingo`（camelCase）| `const myLingoConfig = ...` |
+
+**决策背景**：
+- `my-lingo` 优先于 `my-lango`：`lingo` 是真实英文词（意为"语言/行话"），语义精准；`lango` 不是词，增加认知负担（详见 [00-decisions.md#D13](./00-decisions.md)）
+- 仓库名带 `-claude` 后缀：区分未来可能的其他编辑器版本（VSCode、Cursor）；插件 ID 不带后缀，保持命令简洁
 
 ---
 

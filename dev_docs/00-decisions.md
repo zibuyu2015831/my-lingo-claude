@@ -519,6 +519,49 @@ my-lingo-claude/
 
 ---
 
+## D13：项目命名规范
+
+### 问题
+
+项目在多个层级使用名称：用户界面展示名、插件 ID、命令前缀、数据目录、Git 仓库名、npm 包名、JS 代码变量名。需要统一约定，避免混用。
+
+### 候选方案
+
+**`my-lingo` vs `my-lango`**
+
+- `lingo`：真实英文单词，意为"（某群体的）语言/行话"，语义与本插件高度吻合，有词典收录，易记、可搜索
+- `lango`：不是词，可能被解读为 language 的缩写，但没有明确含义，增加认知负担
+
+**结论：使用 `my-lingo`**
+
+**仓库名是否带 `-claude` 后缀**
+
+- 带后缀（`my-lingo-claude`）：明确表示这是 Claude Code 专属实现，未来若扩展至 VSCode 或 Cursor 时可以用 `my-lingo-vscode` 等区分
+- 不带后缀（`my-lingo`）：更简洁，但和插件 ID 完全相同，容易混淆
+
+**结论：仓库名带 `-claude`，插件 ID 不带**
+
+### 命名层级规范
+
+| 场景 | 形式 | 具体值 |
+|------|------|--------|
+| 用户界面、文档标题、对话中提及 | `My Lingo`（首字母大写 + 空格）| "My Lingo is a plugin..." |
+| `plugin.json` `name` 字段 | `my-lingo`（全小写 kebab-case）| `"name": "my-lingo"` |
+| 用户命令前缀 | `my-lingo`（全小写 kebab-case）| `/my-lingo:status` |
+| 插件数据目录 | `my-lingo`（全小写 kebab-case）| `$CLAUDE_PLUGIN_DATA/my-lingo/` |
+| Git 仓库名 | `my-lingo-claude`（加平台后缀）| `github.com/xxx/my-lingo-claude` |
+| `package.json` `name` 字段 | `my-lingo-claude`（加平台后缀）| `"name": "my-lingo-claude"` |
+| JS 代码变量/函数前缀 | `myLingo`（camelCase）| `const myLingoConfig = ...` |
+
+### 不可混用的场景
+
+- **文档中**：产品名写 "My Lingo"，不写 "my-lingo" 或 "MyLingo"
+- **命令中**：`/my-lingo:setup`，不写 `/MyLingo:setup` 或 `/my_lingo:setup`
+- **代码中**：变量名用 camelCase（`myLingo`），不用 kebab 或 snake_case
+- **路径中**：目录名用 `my-lingo`，不用 `myLingo` 或 `my_lingo`
+
+---
+
 ## 总结：核心决策一览
 
 | 决策点 | 原设计 | 推荐方案 |
@@ -533,3 +576,4 @@ my-lingo-claude/
 | API key 存储 | 配置文件 | 环境变量 / plugin.json userConfig |
 | 学习系统 | 立即实现（含 jobs 表）| SessionEnd 摘要（MVP），SRS（v0.3）|
 | MVP 范围 | 17 项（含多语言空间）| 10 项（单语言空间优先）|
+| 项目命名 | 未定义 | My Lingo / my-lingo / my-lingo-claude（三层分离）|

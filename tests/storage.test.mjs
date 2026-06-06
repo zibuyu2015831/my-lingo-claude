@@ -16,6 +16,9 @@ import {
   writeSession,
   listCorrectionMonths,
   readRecentTurns,
+  listItemMonths,
+  updateLearningItemReview,
+  readItemsDue,
 } from '../scripts/lib/storage.mjs'
 
 function withTempData(fn) {
@@ -314,5 +317,92 @@ test('readRecentTurns(0): returns empty array', () => {
     const result = readRecentTurns(0)
     assert.ok(Array.isArray(result))
     assert.equal(result.length, 0)
+  })
+})
+
+// ── v0.3: listItemMonths ─────────────────────────────────────────────────────
+
+test('listItemMonths: after writing items, returns array containing current month', () => {
+  withTempData(() => {
+    const rec = { type: 'phrase', target_text: 'debug', native_explanation: 'test' }
+    writeLearningItem(rec, 'english')
+    const months = listItemMonths('english')
+    assert.ok(Array.isArray(months))
+    assert.ok(months.includes(CURRENT_MONTH), `should include ${CURRENT_MONTH}, got: ${months}`)
+  })
+})
+
+test('listItemMonths: directory missing → empty array, no throw', () => {
+  withTempData(() => {
+    const months = listItemMonths('nonexistent-space')
+    assert.ok(Array.isArray(months))
+    assert.equal(months.length, 0)
+  })
+})
+
+// ── v0.3: updateLearningItemReview ──────────────────────────────────────────
+
+test('updateLearningItemReview: updates matching item review_count and next_review', () => {
+  withTempData(() => {
+    const now = new Date().toISOString()
+    const rec = { ts: now, type: 'phrase', target_text: 'test phrase', native_explanation: 'foo', review_count: 0, next_review: null }
+    writeLearningItem(rec, 'english')
+    updateLearningItemReview('english', CURRENT_MONTH, now, 1)
+    const items = readLearningItems('english', [CURRENT_MONTH])
+    const updated = items.find(i => i.ts === now)
+    assert.ok(updated, 'item should still exist')
+    assert.equal(updated.review_count, 1)
+    assert.ok(updated.next_review !== null, 'next_review should be set')
+  })
+})
+
+test('updateLearningItemReview: ts not found → other items unchanged', () => {
+  withTempData(() => {
+    const now = new Date().toISOString()
+    const rec = { ts: now, type: 'phrase', target_text: 'unchanged', native_explanation: 'bar', review_count: 0, next_review: null }
+    writeLearningItem(rec, 'english')
+    updateLearningItemReview('english', CURRENT_MONTH, 'nonexistent-ts', 5)
+    const items = readLearningItems('english', [CURRENT_MONTH])
+    const item = items.find(i => i.ts === now)
+    assert.ok(item, 'original item should still exist')
+    assert.equal(item.review_count, 0, 'review_count should not change')
+  })
+})
+
+test('updateLearningItemReview: missing file → no throw', () => {
+  withTempData(() => {
+    assert.doesNotThrow(() => updateLearningItemReview('english', '2000-01', 'fake-ts', 1))
+  })
+})
+
+// ── v0.3: readItemsDue ───────────────────────────────────────────────────────
+
+test('readItemsDue: item with null next_review is returned', () => {
+  withTempData(() => {
+    const now = new Date().toISOString()
+    const rec = { ts: now, type: 'phrase', target_text: 'due item', native_explanation: 'test', review_count: 0, next_review: null }
+    writeLearningItem(rec, 'english')
+    const due = readItemsDue('english')
+    assert.ok(due.length >= 1, 'should have at least 1 due item')
+    assert.ok(due.some(i => i.target_text === 'due item'), 'due item should be present')
+  })
+})
+
+test('readItemsDue: items with future next_review are not returned', () => {
+  withTempData(() => {
+    const future = new Date(Date.now() + 7 * 86400000).toISOString()
+    const now = new Date().toISOString()
+    const rec = { ts: now, type: 'phrase', target_text: 'future item', native_explanation: 'test', review_count: 1, next_review: future }
+    writeLearningItem(rec, 'english')
+    const due = readItemsDue('english')
+    assert.ok(!due.some(i => i.target_text === 'future item'), 'future item should NOT be due')
+  })
+})
+
+test('readItemsDue: directory missing → empty array, no throw', () => {
+  withTempData(() => {
+    const due = readItemsDue('nonexistent-space')
+    assert.ok(Array.isArray(due))
+    assert.equal(due.length, 0)
   })
 })

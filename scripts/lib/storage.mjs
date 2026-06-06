@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { computeNextReview, getItemsDue } from './srs.mjs'
 
 const FALLBACK_DIR = path.join(os.homedir(), '.claude', 'plugins', 'data')
 
@@ -174,6 +175,61 @@ export function listCorrectionMonths(space) {
       if (m) months.push(m[1])
     }
     return months.sort()
+  } catch {
+    return []
+  }
+}
+
+export function listItemMonths(space) {
+  try {
+    const dir = path.join(getDataDir(), 'learning', space)
+    if (!fs.existsSync(dir)) return []
+    const files = fs.readdirSync(dir)
+    const months = []
+    for (const file of files) {
+      const m = file.match(/^items-(\d{4}-\d{2})\.jsonl$/)
+      if (m) months.push(m[1])
+    }
+    return months.sort()
+  } catch {
+    return []
+  }
+}
+
+export function updateLearningItemReview(space, monthKey, itemTs, reviewCount) {
+  try {
+    const file = path.join(getDataDir(), 'learning', space, `items-${monthKey}.jsonl`)
+    if (!fs.existsSync(file)) return
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+    const updated = lines.map(line => {
+      try {
+        const item = JSON.parse(line)
+        if (item.ts !== itemTs) return line
+        item.review_count = reviewCount
+        item.next_review = computeNextReview(reviewCount).toISOString()
+        return JSON.stringify(item)
+      } catch {
+        return line
+      }
+    })
+    fs.writeFileSync(file, updated.join('\n') + '\n', 'utf8')
+  } catch {}
+}
+
+export function readItemsDue(space) {
+  try {
+    const months = listItemMonths(space)
+    const allItems = []
+    for (const month of months) {
+      const file = path.join(getDataDir(), 'learning', space, `items-${month}.jsonl`)
+      try {
+        const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+        for (const line of lines) {
+          try { allItems.push(JSON.parse(line)) } catch {}
+        }
+      } catch {}
+    }
+    return getItemsDue(allItems, Date.now())
   } catch {
     return []
   }

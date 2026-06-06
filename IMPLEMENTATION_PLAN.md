@@ -42,15 +42,53 @@ DONE when ALL of the following hold:
 
 5. package.json has no "dependencies" key (zero npm packages)
 
+6. session-end.mjs runs cleanly with no data present (exit 0, no throw):
+   node scripts/session-end.mjs   → exits 0
+
+7. A unit test exercises buildOptimizationMessages() + API-response parsing
+   against a mocked JSON string (no network), and it passes under npm test.
+
 HARD CONSTRAINTS — never violate:
 - !raw and :: prefixes handled BEFORE shouldSkip() in user-prompt-submit.mjs
 - session-end.mjs does NOT read stdin (no readFileSync(0) or stdin.read())
 - recordApiSuccess() called after every successful callFastModel() result
+  (BOTH the optimize path AND the :: refine path)
 - All file paths built with path.join(), never string-concatenated with input
-- config.json written with mode 0o600
+- config.json written with mode 0o600; api_key NEVER passed as a CLI argument
+- loadConfig() NEVER throws on missing/corrupt config files — it merges DEFAULT_CONFIG
+- emit() drains the pending auth warning (drainWarning) before writing stdout
+- storage / circuit I/O is always wrapped so a write failure never blocks emit()
+  or changes the exit code
+- redact() is applied on BOTH the optimize path AND the :: refine path before
+  any text leaves the machine
+- The detection object shape and the turn-record schema follow §决策原则 D4
+  (one canonical definition, shared by producer and consumer)
 
-Or stop after 40 turns.
+Prioritize satisfying the DONE conditions first; defer non-essential polish.
+Or stop after 55 turns.
 ```
+
+---
+
+## 一·补、决策原则（实施中遇到歧义时据此自主裁决）
+
+实施过程中如遇文档冲突、签名歧义或边界未定义，**不要停下来猜**，按以下原则自行裁决并在代码注释中写明依据：
+
+- **D1 冲突裁决顺序**：`IMPLEMENTATION_PLAN.md` > `dev_docs/`（05/06/07/08）> `claude-english-buddy-ref/` > 自行判断。
+  两份 dev_docs 互相矛盾时，**以"消费方"实际读取的字段名为权威**（例：turn 记录的字段以 `session-end.mjs` / `status` 命令读取的为准）。
+- **D2 失败即放行**：UserPromptSubmit hook 的任何不确定或异常，一律透传原始 prompt、`exit 0`、**绝不抛错**。
+  唯一允许输出 `{ decision: 'block' }` 的情形是 `::` 后内容为空。API 不可用、无 key、curl 缺失、JSON 解析失败 → 全部走 fallback，不阻断用户。
+- **D3 I/O 永不阻断输出**：`storage.mjs` / 熔断器的所有读写用 try/catch 包裹；写失败时降级（跳过记录）但**不改变 emit 与退出码**。
+  顺序上，若 emit 与 writeTurn 并存，emit 的成功不得依赖 writeTurn 成功。
+- **D4 单一事实源（检测对象与 turn schema）**：
+  - `detectLanguage(text)` 唯一返回 `{ lang, ratio }`，其中 `lang ∈ {'en', 'non-english'}`，`ratio` 为 0–100 整数。
+  - turn 记录落盘字段唯一为 snake_case（见 §9.1 schema 表）。`detected_language` 落盘值 = API 返回的 `detected_input_language`（如 `'zh-CN'`），无则回退 `detection.lang`（`'en'` 或 `'non-english'`）。
+  - 生产者（hook）与消费者（session-end / status / last）共用同一份定义，禁止各写各的字段名。
+- **D5 机密处理**：`api_key` 绝不作为命令行参数传递（会暴露在进程列表 / shell history）；config.json 写入 `0o600`、目录 `0o700`；systemMessage 与日志中不回显 key。
+  **api_key 的权威存储位置 = config.json（本计划裁定）**，覆盖 `07-storage.md §4.1` 与 `D7` 中"不存 config.json"的旧表述。
+- **D6 测试可决定性**：detect / privacy / config / storage 为纯函数或仅依赖临时目录；测试不触网络，用 `CLAUDE_PLUGIN_DATA` 环境变量覆盖数据目录；**环境变量在函数调用时读取，不在模块顶层 `const` 捕获**（否则破坏测试隔离）。
+- **D7 v0.2+ 的预留函数**（`writeCorrection` / `writeLearningItem` / `loadSpaces` / `getActiveSpace`）实现为符合 schema 的可用 stub，但**不接入 v0.1 热路径**。
+- **D8 最小输出**：skip → 无 stdout；成功 → `additionalContext` + `systemMessage`；fallback → 仅 `systemMessage`；refine 空 → `decision:'block'`。
 
 ---
 
@@ -98,7 +136,8 @@ my-lingo-claude/
 │   ├── detect.test.mjs
 │   ├── storage.test.mjs
 │   ├── privacy.test.mjs
-│   └── config.test.mjs
+│   ├── config.test.mjs
+│   └── prompts.test.mjs
 ├── package.json
 └── .gitignore
 ```
@@ -157,8 +196,12 @@ my-lingo-claude/
 ### 4.5 Phase 0 验收
 
 ```bash
-npm test   # 即使没有测试文件也应该退出 0（或只提示"no test files found"）
+npm test
 ```
+
+⚠️ 注意：`node --test tests/*.test.mjs` 在 `tests/` 无匹配文件时，shell 会把 glob 原样传入，
+node 报"找不到文件"并**非零退出**。因此 Phase 0 结束前就放入至少一个最小测试（建议先写
+`detect.test.mjs` 的骨架），使 `npm test` 从 Phase 0 起即可通过。"每阶段后跑 npm test"从 Phase 1 起才真正有意义。
 
 ---
 
@@ -173,7 +216,11 @@ npm test   # 即使没有测试文件也应该退出 0（或只提示"no test fi
 ```javascript
 // 检测语言（ASCII 比率 >= 85% 视为英文）
 export function detectLanguage(text)
-// 返回 { language: 'english'|'non-english', ratio: number }
+// 唯一返回 { lang, ratio }，其中 lang ∈ {'en','non-english'}，ratio 为 0–100 整数。
+// ⚠️ 这是全项目唯一的检测对象契约（见 §决策原则 D4）。
+//    systemMessage 用 detection.lang === 'en' 判断 refined/translated；
+//    落盘 detected_language 优先用 API 的 detected_input_language（如 'zh-CN'），
+//    无则回退 detection.lang。不要再引入 detection.language / 'english' 等别名。
 
 // 判断是否应跳过
 export function shouldSkip(prompt)
@@ -185,10 +232,12 @@ export function shouldSkip(prompt)
 // 5. URL/shell 前缀：https?:, git@, ssh://, npm , pip , cargo , brew ,
 //    sudo , cd , ls , cat , grep , docker , kubectl
 
-// 综合检测（外部调用此函数）
+// 综合检测（仅供测试 / 工具使用；生产 hook 不调用它，
+// 生产流程直接用 shouldSkip + detectLanguage，见 §9.3）
 export function detectMode(prompt)
 // 注意：detectMode 内部不处理 !raw/:: — 调用方已在上层处理
-// 返回 { mode: 'skip'|'english'|'non-english', language, ratio, text: prompt }
+// 返回 { mode: 'skip'|'english'|'non-english', lang, ratio, text: prompt }
+// 其中 mode 由 detectLanguage().lang 推导：'en'→'english'，'non-english'→'non-english'
 ```
 
 **关键细节**：
@@ -237,7 +286,17 @@ export function recordApiSuccess()
 
 export function getApiKey(config)
 // 优先级：MY_LINGO_API_KEY 环境变量 > config.api_key
+
+export function parseModelResponse(stdout)
+// 纯函数：把 curl 的 stdout 文本解析为对象，或 null。
+// 流程：JSON.parse(stdout) → 取 choices[0].message.content → JSON.parse(content) → 返回对象；
+// 任一步失败或 response.error 存在 → 返回 null（auth error 时设置 pending warning）。
+// ⚠️ 抽成独立纯函数是为了可被 prompts.test.mjs / api 测试在无网络下覆盖（DONE 校验项 7、D6）。
+// callFastModel 内部调用它处理响应。
 ```
+
+**熔断器调用方约定**：`callFastModel` 自身**不**调用 record* 函数；由 hook 主流程在拿到结果后调用
+`recordApiSuccess()`（成功）或 `recordApiFailure()`（失败），见 §9.3。这样熔断状态的语义集中在一处。
 
 **熔断器文件位置**：`$CLAUDE_PLUGIN_DATA/my-lingo/circuit.json`
 
@@ -261,6 +320,13 @@ export function buildRefineMessages(prompt, config)
 // 期望输出 JSON: { execution_prompt_en }
 ```
 
+**命名约定**：本项目统一用 `buildOptimizationMessages` / `buildRefineMessages`。
+`dev_docs/05-hooks.md` 中出现的 `buildPromptForOptimization` / `buildPromptForRefine` 是旧名，
+实施时以本节名字为准（见 §决策原则 D1）。
+
+**脱敏前置**：两条路径在把文本交给 `buildXxxMessages` 之前都必须先经过
+`redact(text, config.privacy_mode)`——优化路径与 `::` refine 路径**都不例外**（见 §9.3）。
+
 ---
 
 ## 七、Phase 3 — 配置系统
@@ -276,8 +342,13 @@ export function loadConfig(cwd)
 // 四层合并（优先级从高到低）：
 // 1. 项目级：path.join(cwd, '.claude-my-lingo.json')（可选）
 // 2. 语言空间级：spaces.json 中 active space 的 overrides（可选）
-// 3. 全局：$CLAUDE_PLUGIN_DATA/my-lingo/config.json（必须存在）
+// 3. 全局：$CLAUDE_PLUGIN_DATA/my-lingo/config.json（可选）
 // 4. 默认值（下方 DEFAULT_CONFIG）
+//
+// ⚠️ 关键（见 §决策原则 D2/D4）：以上文件任意缺失或 JSON 损坏，
+//    一律视为空对象处理，与 DEFAULT_CONFIG 合并后返回，**绝不抛错**。
+//    /goal 的 DONE 校验项 3/4 会在未跑 setup（无 config.json）的环境运行 hook，
+//    此时 loadConfig 必须返回 execution_mode='english_optimized' 等默认值。
 
 const DEFAULT_CONFIG = {
   execution_mode: 'english_optimized',
@@ -321,10 +392,12 @@ allowed-tools: Bash, Read
 Workflow 步骤（使用 `AskUserQuestion` 不可用时改用顺序说明）：
 1. 检查 config.json 是否已存在，存在则提示是否覆盖
 2. 通过对话获取：`api_base_url`、`api_key`、`model_fast`（可选 `model_deep`）、`native_language`
-3. 调用 `node -e` 写入 config.json（mode 0o600）
-4. 调用 `node -e` 初始化 spaces.json（默认 English 空间）
-5. 发起测试请求验证 API 连通性
-6. 输出配置摘要
+3. 写入 config.json（mode 0o600，目录 0o700）
+   ⚠️ api_key 不得作为 `node -e "...key..."` 的命令行实参拼入（暴露在进程列表 / history）。
+   改为：把含 key 的 JSON 通过 stdin 传给一个读 stdin 的 node 脚本，或写入临时文件再由 node 读取后删除。
+4. 初始化 spaces.json（默认 English 空间）
+5. 发起测试请求验证 API 连通性（失败时给出可操作提示，不写入坏配置）
+6. 输出配置摘要（绝不回显完整 api_key，最多显示后 4 位）
 
 ---
 
@@ -375,11 +448,30 @@ export function getDataDir()
 // path.join(process.env.CLAUDE_PLUGIN_DATA || fallback, 'my-lingo')
 // fallback: path.join(os.homedir(), '.claude', 'plugins', 'data')
 
-export function writeTurn(record)
-// 追加到 turns/YYYY-MM-DD.jsonl，使用 new Date().toISOString() 作为 ts
-// record 字段：ts, session_id, cwd, language_space, execution_mode,
-//   detected_language, original_prompt, execution_prompt, rewrite_type,
-//   latency_ms, fallback, mode
+export function writeTurn(input, config)
+// 追加一行到 turns/YYYY-MM-DD.jsonl。⚠️ 这是生产者→消费者的契约核心（见 §决策原则 D4）。
+// 调用方传入富对象 input（camelCase + 嵌套 detection）+ config；
+// writeTurn 负责映射成下方唯一的 snake_case 落盘 schema，session-end / status / last 据此读取。
+
+// ── 落盘 schema（snake_case，唯一权威）──────────────────────────────
+// {
+//   ts:                new Date().toISOString(),
+//   session_id:        input.sessionId,
+//   cwd:               config.cwd ?? input.cwd ?? process.cwd(),
+//   language_space:    config.language_space ?? 'english',   // MVP 单空间，默认 english
+//   execution_mode:    input.mode,                            // english_optimized/original/raw/refine/...
+//   mode:              input.mode,                            // 与 execution_mode 同值，便于 session-end 过滤
+//   detected_language: input.detectedLanguage
+//                        ?? (input.detection?.lang ?? 'en'),  // 优先 API 的 detected_input_language
+//   original_prompt:   input.prompt,
+//   execution_prompt:  input.executionPrompt ?? null,
+//   rewrite_type:      input.rewriteType ?? null,
+//   latency_ms:        input.latencyMs ?? null,
+//   fallback:          Boolean(input.fallback),
+//   fallback_reason:   input.fallbackReason ?? null,          // 'api_timeout' / 'api_error' / 'circuit_open'
+// }
+// ──────────────────────────────────────────────────────────────────
+// 整个函数体用 try/catch 包裹，写失败时静默返回（见 §决策原则 D3），不得抛错。
 
 export function readTurnsForDay(date)   // date: 'YYYY-MM-DD'，返回记录数组
 export function readTurnsForRange(startDate, endDate)
@@ -413,6 +505,10 @@ function withTempData(fn) {
 
 ### 9.3 scripts/user-prompt-submit.mjs — 完整流程
 
+> **此流程为权威，覆盖 `dev_docs/05-hooks.md §2.3` 的示例**（后者缺熔断与 drainWarning，照抄会有 bug，见 §决策原则 D1）。
+
+`emit(obj)` 实现：先 `obj = drainWarning(obj)`（合并待播 auth warning），再 `stdout.write(JSON.stringify(obj)+'\n')`。
+
 严格按以下顺序（违反顺序是已知 bug）：
 
 ```
@@ -421,10 +517,13 @@ function withTempData(fn) {
 rawPrompt = input.prompt.trim()
 
 ① !raw 前缀检测（BEFORE shouldSkip）
-  → 记录 mode:'raw' turn，emit systemMessage，return
+  → loadConfig；execution_mode==='off' 则 return
+  → writeTurn(mode:'raw', fallback:false)（try/catch 包裹）
+  → emit systemMessage（含字面量 "!raw"），return
+  ⚠️ emit 不得依赖 writeTurn 成功（D3）：先 writeTurn 后 emit，writeTurn 抛错也要 emit 成功。
 
 ② :: 前缀检测（BEFORE shouldSkip）
-  → 设置 isRefine = true，text = prompt.slice(2).trimStart()
+  → isRefine = true，text = rawPrompt.slice(2).trimStart()
 
 ③ shouldSkip(rawPrompt) 检测
   → 返回 true 时直接 return（无任何输出）
@@ -432,19 +531,28 @@ rawPrompt = input.prompt.trim()
 ④ loadConfig(cwd)
   → execution_mode === 'off' → return
   → execution_mode === 'original' → writeTurn(mode:'original')，return
+  → 长度护栏：[...text].length > config.max_prompt_length 时，跳过 API 优化，
+     writeTurn(fallback:true, fallback_reason:'too_long')，emit 提示后 return（避免超时/高成本）
 
 ⑤ isRefine === true → refine 路径
-  → callFastModel(buildRefineMessages(...))
-  → 失败：emit { decision:'block', reason:'...' }
-  → 成功：recordApiSuccess()，writeTurn(mode:'refine')，emit { additionalContext, systemMessage }
+  → text 为空 → emit { decision:'block', reason:'Nothing to refine. Provide text after ::.' }，return
+  → redacted = redact(text, config.privacy_mode)          // ⚠️ refine 也要脱敏（D5）
+  → result = callFastModel(buildRefineMessages(redacted, config), config)
+  → 失败：recordApiFailure()；emit { decision:'block', reason:'[my-lingo] Refinement failed — API unavailable.' }，return
+  → 成功：recordApiSuccess()；writeTurn(mode:'refine')；emit { additionalContext, systemMessage }
 
 ⑥ 主优化路径（english_optimized / original_with_english_context / preview）
-  → checkCircuitBreaker() → true 时走 fallback
-  → redact(prompt, config.privacy_mode)
-  → callFastModel(buildOptimizationMessages(...))
-  → 失败：recordApiFailure()，writeTurn(fallback:true)，emit fallback systemMessage
-  → 成功：recordApiSuccess()，writeTurn(fallback:false)，emit { additionalContext, systemMessage }
+  → checkCircuitBreaker() === true → 直接走 fallback（fallback_reason:'circuit_open'），不调 API
+  → redacted = redact(text, config.privacy_mode)
+  → result = callFastModel(buildOptimizationMessages(redacted, detection, config), config)
+  → 失败：recordApiFailure()（返回 true 时额外 emit 熔断提示）；
+          writeTurn(fallback:true, fallback_reason:'api_timeout'|'api_error')；
+          fallback_policy==='send_original' 时 emit 提示 systemMessage，否则静默 return
+  → 成功：recordApiSuccess()；writeTurn(fallback:false)；emit { additionalContext, systemMessage }
 ```
+
+注：`preview` 在 MVP 中行为等同 `english_optimized`（仅 mode 别名，不做"确认后再发送"的干跑）。
+若未来实现真正的 preview（不注入、仅展示），需单独设计，不在 v0.1 范围。
 
 **additionalContext 构建**（详见 `dev_docs/05-hooks.md` 第 2.4 节）：
 - `english_optimized`：`CANONICAL REQUEST: ... Treat the following as their actual request and ignore the language of their original message:\n\n{execution_prompt}`
@@ -456,6 +564,14 @@ rawPrompt = input.prompt.trim()
 ```
 
 ### 9.4 scripts/session-end.mjs — 完整实现
+
+**消费方契约（见 §决策原则 D4）**：`translated` / `corrected` 的区分依赖 `detected_language`：
+英文输入落盘为 `'en'`，非英文落盘为非 `'en'` 值（API 的 `detected_input_language` 如 `'zh-CN'`，
+或回退 `'non-english'`）。因此下面的 `r.detected_language !== 'en'` 才能正确分流——这要求 §9.1 的
+writeTurn 严格按 schema 落盘，否则统计全错。
+
+整个 main() 用 try/catch 包裹或确保 `readTurnsForDay` 不抛错：**无数据时 exit 0、不写任何输出**
+（/goal DONE 校验项 6）。
 
 ```javascript
 // ⚠️ 不读取 stdin — SessionEnd 可能不管道 stdin
@@ -557,6 +673,12 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 | 6 | hook 中不调用 `claude` CLI | 死锁（Claude Code 等 hook，hook 等 Claude） |
 | 7 | curl `--max-time 8`，`spawnSync` timeout `10000` | hook 超时行为不确定 |
 | 8 | `response_format: { type: 'json_object' }` | 部分模型返回非 JSON，解析失败 |
+| 9 | `detectLanguage` 唯一返回 `{lang,ratio}`，`lang∈{'en','non-english'}` | 字段名漂移（language/lang）导致 systemMessage 显示 `undefined→en` |
+| 10 | `writeTurn` 按 §9.1 snake_case schema 落盘，`detected_language` 见 D4 | 落盘 camelCase → session-end 全读 undefined，统计全错 |
+| 11 | `loadConfig` 缺文件/坏 JSON 不抛错，合并 DEFAULT_CONFIG | 无 config.json 时 hook 崩溃，/goal 校验项 3/4 失败 |
+| 12 | `emit()` 先 `drainWarning` 再写 stdout | auth 失败提示永远不显示给用户 |
+| 13 | `redact()` 在优化路径与 `::` refine 路径都执行 | refine 内容明文外发，泄密 |
+| 14 | storage/circuit I/O 全 try/catch，不阻断 emit/退出码 | 写盘失败连带 hook 非零退出，/goal 校验项 4 失败 |
 
 ---
 
@@ -571,10 +693,15 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 
 | 文件 | 覆盖点 |
 |------|--------|
-| `detect.test.mjs` | 中文/英文/混合/slash/短/URL/npm/`!raw`处理前提 |
-| `storage.test.mjs` | 写入/读取/空文件/日期列表/总计数/临时目录隔离 |
+| `detect.test.mjs` | 中文/英文/混合/slash/短/URL/npm/`!raw`处理前提；detectLanguage 返回 `{lang,ratio}` 且 lang∈{'en','non-english'} |
+| `storage.test.mjs` | writeTurn 落盘字段为 snake_case（断言 `detected_language`/`original_prompt` 等存在）/读取/空文件/日期列表/总计数/临时目录隔离 |
 | `privacy.test.mjs` | 6 类脱敏规则 + off 模式 + 技术词不误脱敏 |
-| `config.test.mjs` | 默认值/覆盖合并/写入权限/缺失文件容错 |
+| `config.test.mjs` | 默认值/覆盖合并/写入权限 0o600/**缺失或坏 JSON 时不抛错、返回默认值** |
+| `prompts.test.mjs` | buildOptimizationMessages 产出合法 messages；解析 mock 的 `choices[0].message.content`（合法 JSON / 垃圾串两种）→ 对象 / null（DONE 校验项 7）|
+
+`detected_language` 的端到端契约（writeTurn 落盘 → session-end 读取分流）建议在
+`storage.test.mjs` 里加一条断言：英文 turn 落盘 `detected_language==='en'`，
+非英文 turn 落盘非 `'en'` 值，防止 §9.1/§9.4 契约回归。
 
 ---
 

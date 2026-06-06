@@ -1,0 +1,87 @@
+---
+name: status
+description: Show current My Lingo status, configuration, and today's stats.
+allowed-tools: Bash, Read, Glob
+---
+
+## Workflow
+
+Display the current My Lingo configuration and today's optimization statistics.
+
+### Step 1: Load configuration
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
+CONFIG_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/config.json"
+SPACES_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/spaces.json"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "[my-lingo] Not configured. Run /my-lingo:setup to get started."
+  exit 0
+fi
+
+node -e "
+const fs = require('fs');
+const path = require('path');
+
+const dataDir = process.env.CLAUDE_PLUGIN_DATA
+  ? path.join(process.env.CLAUDE_PLUGIN_DATA, 'my-lingo')
+  : path.join(require('os').homedir(), '.claude', 'plugins', 'data', 'my-lingo');
+
+let cfg = {};
+try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')); } catch {}
+
+let spaces = { active: 'english' };
+try { spaces = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8')); } catch {}
+
+const today = new Date().toISOString().slice(0, 10);
+const turnsFile = path.join(dataDir, 'turns', today + '.jsonl');
+let turns = [];
+try {
+  turns = fs.readFileSync(turnsFile, 'utf8').split('\n').filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+} catch {}
+
+const optimized = turns.filter(r => r.execution_prompt && !r.fallback);
+const translated = turns.filter(r => r.detected_language !== 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
+const corrected = turns.filter(r => r.detected_language === 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
+const fallbacks = turns.filter(r => r.fallback);
+
+// count all historical turns
+let total = 0;
+try {
+  const turnsDir = path.join(dataDir, 'turns');
+  if (fs.existsSync(turnsDir)) {
+    total = fs.readdirSync(turnsDir).filter(f => f.endsWith('.jsonl'))
+      .reduce((s, f) => {
+        try {
+          return s + fs.readFileSync(path.join(turnsDir, f), 'utf8').split('\n').filter(Boolean).length;
+        } catch { return s; }
+      }, 0);
+  }
+} catch {}
+
+console.log('');
+console.log('╔══════════════════════════════════════╗');
+console.log('║         My Lingo — Status            ║');
+console.log('╚══════════════════════════════════════╝');
+console.log('');
+console.log('Configuration:');
+console.log('  Mode:        ' + (cfg.execution_mode || 'english_optimized'));
+console.log('  Language:    ' + (cfg.native_language || 'zh-CN'));
+console.log('  Space:       ' + (spaces.active || 'english'));
+console.log('  Model:       ' + (cfg.model_fast || '(not set)'));
+console.log('  API URL:     ' + (cfg.api_base_url || '(not set)'));
+console.log('  Privacy:     ' + (cfg.privacy_mode || 'standard'));
+console.log('');
+console.log('Today (' + today + '):');
+console.log('  Total turns:  ' + turns.length);
+console.log('  Optimized:    ' + optimized.length);
+console.log('  Translated:   ' + translated.length);
+console.log('  Corrected:    ' + corrected.length);
+console.log('  Fallbacks:    ' + fallbacks.length);
+console.log('');
+console.log('All time:');
+console.log('  Total turns:  ' + total);
+"
+```

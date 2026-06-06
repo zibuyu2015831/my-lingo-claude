@@ -5,15 +5,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   startMockServer, stopServer,
-  makeSuccessHandler, makeAuthErrorHandler,
+  makeSuccessHandler, makeAuthErrorHandler, makeMarkdownHandler,
 } from './mock-server.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   makeTmpDir, cleanup,
   writeConfig, writeCircuitJson, circuitJsonExists, readCircuitJson,
   writeTurnsFile, readTurnsForDate,
   runHookSync, runHookAsync, runSessionEnd, runSessionEndAsync,
+  ROOT,
 } from './helpers.mjs'
 
 // Minimal config shared across sync tests (no real API involved).
@@ -319,6 +321,115 @@ test('PT-010: session-end — raw-only turns skip analysis, no corrections file'
     const currentMonth = today.slice(0, 7)
     const correctionsFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `corrections-${currentMonth}.jsonl`)
     assert.ok(!fs.existsSync(correctionsFile), 'corrections file should NOT exist for raw-only session')
+  } finally {
+    cleanup(dataDir)
+  }
+})
+
+// ── PT-011: generate-lesson.mjs generates lesson via mock server ──────────────
+
+test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown', async () => {
+  const lessonMarkdown = '# My Lingo Lesson\n\n## Summary\nFocus on verb agreement.\n'
+  const { server, port } = await startMockServer(makeMarkdownHandler(lessonMarkdown))
+  const dataDir = makeTmpDir()
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const currentMonth = today.slice(0, 7)
+
+    // Pre-write some corrections so generate-lesson has data to work with
+    const corrDir = path.join(dataDir, 'my-lingo', 'learning', 'english')
+    fs.mkdirSync(corrDir, { recursive: true })
+    const corrFile = path.join(corrDir, `corrections-${currentMonth}.jsonl`)
+    const corrections = [
+      { ts: new Date().toISOString(), type: 'grammar', original: 'this have bug', corrected: 'this has a bug', explanation: 'test', pattern: 'subject-verb' },
+      { ts: new Date().toISOString(), type: 'grammar', original: 'need fix', corrected: 'need to fix', explanation: 'test2', pattern: 'infinitive' },
+      { ts: new Date().toISOString(), type: 'grammar', original: 'have problem', corrected: 'has a problem', explanation: 'test3', pattern: 'subject-verb' },
+    ]
+    fs.writeFileSync(corrFile, corrections.map(c => JSON.stringify(c)).join('\n') + '\n')
+
+    writeConfig(dataDir, {
+      execution_mode: 'english_optimized',
+      api_base_url: `http://127.0.0.1:${port}`,
+      model_fast: 'test-model',
+      model_deep: 'test-model',
+      native_language: 'zh-CN',
+      timeout_seconds: 10,
+    })
+
+    const result = await new Promise((resolve) => {
+      const child = spawn('node', [path.join(ROOT, 'scripts/generate-lesson.mjs'), '--days', '7'], {
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: dataDir,
+          MY_LINGO_API_KEY: 'sk-test',
+        },
+        cwd: ROOT,
+      })
+      let stdout = '', stderr = ''
+      child.stdout.on('data', d => { stdout += d })
+      child.stderr.on('data', d => { stderr += d })
+      child.on('close', status => resolve({ stdout, stderr, status }))
+      setTimeout(() => { child.kill(); resolve({ stdout, stderr, status: -1 }) }, 15000)
+    })
+
+    assert.equal(result.status, 0, `generate-lesson should exit 0, stderr: ${result.stderr}`)
+    assert.ok(result.stdout.includes('# My Lingo Lesson'), `stdout should contain lesson heading, got: ${result.stdout.slice(0, 200)}`)
+
+    const lessonFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `lessons-${today}.md`)
+    assert.ok(fs.existsSync(lessonFile), `lesson file should exist: ${lessonFile}`)
+    const fileContent = fs.readFileSync(lessonFile, 'utf8')
+    assert.ok(fileContent.includes('# My Lingo Lesson'), 'lesson file should contain heading')
+  } finally {
+    cleanup(dataDir)
+    await stopServer(server)
+  }
+})
+
+// ── PT-012: SRS due items correctly filtered (storage unit test) ──────────────
+
+test('PT-012: readItemsDue — correctly filters due items, null sorts first', () => {
+  const dataDir = makeTmpDir()
+  try {
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const itemsDir = path.join(dataDir, 'my-lingo', 'learning', 'english')
+    fs.mkdirSync(itemsDir, { recursive: true })
+
+    const pastDate = new Date(Date.now() - 2 * 86400000).toISOString()
+    const futureDate = new Date(Date.now() + 7 * 86400000).toISOString()
+
+    const itemA = { ts: 'ts-a', type: 'phrase', target_text: 'item A (past)', native_explanation: 'past due', review_count: 1, next_review: pastDate }
+    const itemB = { ts: 'ts-b', type: 'phrase', target_text: 'item B (null)', native_explanation: 'never reviewed', review_count: 0, next_review: null }
+    const itemC = { ts: 'ts-c', type: 'phrase', target_text: 'item C (future)', native_explanation: 'not yet due', review_count: 1, next_review: futureDate }
+
+    const itemsFile = path.join(itemsDir, `items-${currentMonth}.jsonl`)
+    fs.writeFileSync(itemsFile, [itemA, itemB, itemC].map(i => JSON.stringify(i)).join('\n') + '\n')
+
+    // Import and call readItemsDue
+    // Use inline Node process to avoid env contamination
+    const result = spawnSync('node', ['--input-type=module'], {
+      input: `
+import { readItemsDue } from './scripts/lib/storage.mjs'
+process.env.CLAUDE_PLUGIN_DATA = ${JSON.stringify(dataDir)}
+const due = readItemsDue('english')
+console.log(JSON.stringify(due))
+`,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+      cwd: ROOT,
+    })
+
+    assert.equal(result.status, 0, `readItemsDue process failed: ${result.stderr}`)
+    const due = JSON.parse(result.stdout.trim())
+
+    const dueTss = due.map(i => i.ts)
+    assert.ok(dueTss.includes('ts-a'), 'item A (past) should be due')
+    assert.ok(dueTss.includes('ts-b'), 'item B (null) should be due')
+    assert.ok(!dueTss.includes('ts-c'), 'item C (future) should NOT be due')
+
+    // Verify B (null) comes before A (past)
+    const bIdx = dueTss.indexOf('ts-b')
+    const aIdx = dueTss.indexOf('ts-a')
+    assert.ok(bIdx < aIdx, `null item (B) should come before past item (A), got order: ${dueTss}`)
   } finally {
     cleanup(dataDir)
   }

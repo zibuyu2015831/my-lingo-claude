@@ -306,7 +306,7 @@ export function writeLearningItem(record, space) {
 
 当需要迁移到 SQLite 时，执行以下步骤：
 
-1. 创建 SQLite schema（见 design.md 第 16 节作为参考）
+1. 设计 SQLite schema（参考现有 JSONL 字段结构）
 2. 编写迁移脚本：`scripts/migrate-jsonl-to-sqlite.mjs`
 3. 批量读取所有 JSONL 文件，写入 SQLite
 4. 保留 JSONL 文件作为备份（不删除）

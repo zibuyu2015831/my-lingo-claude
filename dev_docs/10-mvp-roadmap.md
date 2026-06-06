@@ -181,14 +181,14 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 - `/my-lingo:profile`
 - 简化 SRS（`next_review` 字段）
 - `/my-lingo:review`
+- `/my-lingo:export`（导出学习材料为 Markdown）
 
 ---
 
-### v1.0 里程碑：SQLite 与完整导出
+### v1.0 里程碑：SQLite 迁移
 
 **新增功能**：
 - SQLite 迁移（从 JSONL 迁移）
-- 完整导出（`/my-lingo:export`）
 
 ---
 

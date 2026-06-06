@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOptimizationMessages, buildRefineMessages } from '../scripts/lib/prompts.mjs'
+import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from '../scripts/lib/prompts.mjs'
 import { parseModelResponse } from '../scripts/lib/api.mjs'
 
 const MOCK_CONFIG = {
@@ -129,4 +129,30 @@ test('parseModelResponse: full mock flow — extract execution_prompt_en', () =>
 test('parseModelResponse: null on non-null error', () => {
   assert.equal(parseModelResponse(null), null)
   assert.equal(parseModelResponse(undefined), null)
+})
+
+// ── buildSummaryLanguageCtx ─────────────────────────────────────────────────
+
+test('buildSummaryLanguageCtx: returns empty string when no native_language', () => {
+  assert.equal(buildSummaryLanguageCtx({}), '')
+})
+
+test('buildSummaryLanguageCtx: returns empty string for native_language = en', () => {
+  assert.equal(buildSummaryLanguageCtx({ native_language: 'en' }), '')
+})
+
+test('buildSummaryLanguageCtx: returns instruction for zh-CN', () => {
+  const ctx = buildSummaryLanguageCtx({ native_language: 'zh-CN' })
+  assert.ok(ctx.includes('zh-CN'))
+  assert.ok(ctx.includes('summary'))
+})
+
+test('buildSummaryLanguageCtx: summary_language takes priority over native_language', () => {
+  const ctx = buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language: 'ja' })
+  assert.ok(ctx.includes('ja'))
+  assert.ok(!ctx.includes('zh-CN'))
+})
+
+test('buildSummaryLanguageCtx: returns empty string when summary_language = en', () => {
+  assert.equal(buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language: 'en' }), '')
 })

@@ -261,28 +261,30 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 
 ## 5. 验收测试清单（v0.1 发布前）
 
+> v0.1 MVP 代码实现已完成（88 单元测试通过）。以下清单区分"单元测试已覆盖"和"需要真实 API/会话的集成测试"（见 `PENDING_TESTS.md`）。
+
 ### 功能测试
 
-- [ ] 安装插件，`/my-lingo:setup` 成功配置 API
-- [ ] 输入中文 prompt，`systemMessage` 显示优化结果
-- [ ] 输入英文 prompt（有语法错误），`systemMessage` 显示纠正
-- [ ] 输入 slash 命令，hook 跳过，无 systemMessage
-- [ ] API 超时（配置错误的 URL），走 fallback，systemMessage 提示
-- [ ] `/my-lingo:status` 显示正确的今日统计
-- [ ] `/my-lingo:last` 显示上一条记录
-- [ ] `/my-lingo:mode raw` 切换到 original 模式
-- [ ] 会话结束后 stderr 显示会话统计
-- [ ] turns JSONL 文件正确创建并追加记录
+- [ ] 安装插件，`/my-lingo:setup` 成功配置 API（PT-007）
+- [ ] 输入中文 prompt，`systemMessage` 显示优化结果（PT-001）
+- [ ] 输入英文 prompt（有语法错误），`systemMessage` 显示纠正（PT-001）
+- [ ] 输入 slash 命令，hook 跳过，无 systemMessage — ✅ 单元测试覆盖
+- [ ] API 超时（配置错误的 URL），走 fallback，systemMessage 提示（PT-002）
+- [ ] `/my-lingo:status` 显示正确的今日统计（PT-006 前置）
+- [ ] `/my-lingo:last` 显示上一条记录（PT-006 前置）
+- [ ] `/my-lingo:mode raw` 切换到 original 模式（需要交互会话）
+- [ ] 会话结束后 stderr 显示会话统计（PT-006）
+- [ ] turns JSONL 文件正确创建并追加记录 — ✅ 单元测试覆盖（storage.test.mjs）
 
 ### 边界测试
 
-- [ ] 极短 prompt（3字）→ 跳过
-- [ ] 纯代码块 prompt → 跳过
-- [ ] 包含 API key 的 prompt → 发给 API 时被脱敏
-- [ ] API 连续失败 → 熔断器触发，后续请求走 fallback
-- [ ] 冷却期后熔断器自动恢复
+- [ ] 极短 prompt（3字）→ 跳过 — ✅ 单元测试覆盖（detect.test.mjs）
+- [ ] 纯代码块 prompt → 跳过 — ✅ 单元测试覆盖
+- [ ] 包含 API key 的 prompt → 发给 API 时被脱敏 — ✅ 单元测试覆盖（privacy.test.mjs）
+- [ ] API 连续失败 → 熔断器触发，后续请求走 fallback（PT-002）
+- [ ] 冷却期后熔断器自动恢复（PT-003）
 
 ### 性能测试
 
-- [ ] Fast model 平均响应时间 < 3s（使用 DeepSeek V3 或 GPT-4o-mini）
-- [ ] hook 进程在 8s 内必定退出（即使 API 挂起）
+- [ ] Fast model 平均响应时间 < 3s（使用 DeepSeek V3 或 GPT-4o-mini）（PT-001）
+- [ ] hook 进程在 8s 内必定退出（即使 API 挂起）（PT-001）

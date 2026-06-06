@@ -53,3 +53,11 @@ export function buildRefineMessages(prompt, config) {
     ],
   }
 }
+
+// Builds a trailing instruction for Claude to append a native-language summary.
+// Returns empty string when not applicable (lang is 'en' or not configured).
+export function buildSummaryLanguageCtx(config) {
+  const lang = config.summary_language || config.native_language
+  if (!lang || lang === 'en') return ''
+  return `\n\nAfter your response, append a brief summary in ${lang} (2-3 sentences) so the user can quickly grasp the key points in their native language.`
+}

@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.1 MVP 实现阶段**（文档完备，代码尚未创建）|
+| 当前阶段 | **v0.1 MVP 已完成**（88 单元测试通过，Phase 0–5 全部实现）|
 
 ---
 
@@ -52,6 +52,7 @@ my-lingo-claude/
 │       └── privacy.mjs          # 脱敏处理
 ├── tests/
 │   ├── detect.test.mjs
+│   ├── prompts.test.mjs
 │   ├── privacy.test.mjs
 │   ├── config.test.mjs
 │   └── storage.test.mjs
@@ -147,18 +148,18 @@ Claude 会话结束
 
 ## MVP 实现状态（v0.1）
 
-当前状态：**文档完备，代码待实现**
+当前状态：**v0.1 MVP 已完成实现，88 单元测试通过**
 
 ### 实现阶段
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 0 | 插件骨架：`plugin.json` + `hooks/hooks.json` + hook 桩 + `storage.mjs` + `status.md` | 待实现 |
-| Phase 1 | `detect.mjs`（语言检测 + 跳过逻辑） | 待实现 |
-| Phase 2 | `api.mjs`（curl 调用 + 熔断器）+ `prompts.mjs` + `additionalContext`/`systemMessage` 注入 | 待实现 |
-| Phase 3 | `config.mjs`（4 层配置合并）+ `setup.md` + `mode.md` | 待实现 |
-| Phase 4 | `privacy.mjs`（脱敏规则） | 待实现 |
-| Phase 5 | 完善 `status.md` + `last.md` + 单元测试 | 待实现 |
+| Phase 0 | 插件骨架：`plugin.json` + `hooks/hooks.json` + hook 桩 + `storage.mjs` + `status.md` | ✅ 已完成 |
+| Phase 1 | `detect.mjs`（语言检测 + 跳过逻辑） | ✅ 已完成 |
+| Phase 2 | `api.mjs`（curl 调用 + 熔断器）+ `prompts.mjs` + `additionalContext`/`systemMessage` 注入 | ✅ 已完成 |
+| Phase 3 | `config.mjs`（4 层配置合并）+ `setup.md` + `mode.md` | ✅ 已完成 |
+| Phase 4 | `privacy.mjs`（脱敏规则） | ✅ 已完成 |
+| Phase 5 | 完善 `status.md` + `last.md` + 单元测试 + `session-end.mjs` | ✅ 已完成 |
 
 ### MVP 必须实现的功能（10 项）
 

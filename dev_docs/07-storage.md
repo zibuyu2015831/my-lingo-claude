@@ -242,14 +242,6 @@ export function listTurnDates() {
     .sort()
 }
 
-// 读取最近 N 天的所有 turns 记录（含今天）
-export function readTurnsLastNDays(n) {
-  const end = new Date()
-  const start = new Date()
-  start.setDate(start.getDate() - (n - 1))
-  return readTurnsForRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10))
-}
-
 // 统计所有历史 turns 的总记录数（用于 status 命令）
 export function countTotalTurns() {
   return listTurnDates().reduce((sum, date) => {
@@ -280,7 +272,7 @@ export function countTotalTurns() {
 }
 ```
 
-注意：`api_key` **不存储**在 config.json 中，从环境变量或 Claude Code userConfig 读取。
+注意：`api_key` 存储在 config.json 中（权限 0o600），由 `/my-lingo:setup` 写入。运行时优先读取 `MY_LINGO_API_KEY` 环境变量，其次读取 `config.api_key`（见 `api.mjs` 的 `getApiKey()`）。
 
 ### 4.2 spaces.json（语言空间）
 

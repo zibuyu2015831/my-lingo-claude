@@ -254,7 +254,7 @@ Based on last 30 days, 89 errors analyzed.
 
 课程内容来自：当前语言空间 + 指定时间范围内的真实 turns 和错误记录。
 
-课程结构见 `06-learning-system.md`。
+课程结构见 `07-storage.md`（learning 目录结构）。
 
 ---
 

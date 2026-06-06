@@ -2,7 +2,10 @@
   "name": "my-lingo",
   "version": "0.1.0",
   "description": "A personal Claude Code language-learning and prompt-enhancement plugin. Optimizes your prompts to English and builds personalized language learning materials from your real coding interactions.",
-  "author": "Zane",
+  "author": { "name": "Zane", "email": "wenbo002@e.ntu.edu.sg" },
+  "license": "MIT",
+  "keywords": ["language-learning", "prompt-optimization", "non-native", "chinese", "translation", "developer-tools"],
+  "category": "developer-tools",
   "commands": "./commands",
   "hooks": "./hooks/hooks.json",
   "userConfig": {

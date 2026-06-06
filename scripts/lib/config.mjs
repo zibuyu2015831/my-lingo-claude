@@ -113,7 +113,6 @@ export function addSpace(key, overrides = {}) {
   const existing = data.spaces[normalKey] || {}
   const displayName = normalKey.charAt(0).toUpperCase() + normalKey.slice(1)
   const newSpace = {
-    key: normalKey,
     display_name: displayName,
     target_language: 'en',
     native_language: 'zh-CN',

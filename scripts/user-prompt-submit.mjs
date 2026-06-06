@@ -89,8 +89,8 @@ function main() {
   // ② :: prefix — MUST be before shouldSkip (detect before skip check)
   const isRefine = rawPrompt.startsWith('::')
 
-  // ③ shouldSkip check — at this point !raw has been consumed
-  if (shouldSkip(rawPrompt)) return
+  // ③ shouldSkip check — bypass for :: refine so short commands like ":: fix" still work
+  if (!isRefine && shouldSkip(rawPrompt)) return
 
   // ④ Load config
   const config = loadConfig(cwd)
@@ -133,7 +133,7 @@ function main() {
   // ⑤ Refine path (:: prefix)
   if (isRefine) {
     if (!text) {
-      emit(drainWarning({ decision: 'block', reason: 'Nothing to refine. Provide text after ::.' }))
+      emit({ decision: 'block', reason: 'Nothing to refine. Provide text after ::.' })
       return
     }
     const redacted = redact(text, config.privacy_mode)

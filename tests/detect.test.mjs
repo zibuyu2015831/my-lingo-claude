@@ -138,3 +138,23 @@ test('shouldSkip: 8-char prompt without word limit → false', () => {
   // exactly 8 chars AND 1 word: charCount >= 8 so condition fails → not skipped
   assert.equal(shouldSkip('abcdefgh'), false)
 })
+
+// ── :: refine prefix and shouldSkip interaction ──────────────────────────────
+
+test('shouldSkip: "::" alone is skipped (too short)', () => {
+  // The hook bypasses shouldSkip for isRefine=true; this just documents the raw behavior
+  assert.equal(shouldSkip('::'), true)
+})
+
+test('shouldSkip: ":: fix" is skipped (too short, <8 chars, <3 words)', () => {
+  // The hook bypasses shouldSkip for isRefine=true so this doesn't block :: fix
+  assert.equal(shouldSkip(':: fix'), true)
+})
+
+test('shouldSkip: ":: fix it" passes (3 words)', () => {
+  assert.equal(shouldSkip(':: fix it'), false)
+})
+
+test('shouldSkip: ":: make tests not slow" passes', () => {
+  assert.equal(shouldSkip(':: make tests not slow'), false)
+})

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getDataDir } from './storage.mjs'
+import { debugLog } from './debug.mjs'
 
 const CIRCUIT_THRESHOLD = 3
 const COOLDOWN_MINUTES = 5
@@ -57,6 +58,12 @@ export function callFastModel(payload, config) {
     messages: payload.messages,
   })
 
+  debugLog('API_REQUEST', {
+    url: `${config.api_base_url}/chat/completions`,
+    model: config.model_fast,
+    messages: payload.messages,
+  }, config)
+
   const result = spawnSync('curl', [
     '-s',
     '--max-time', String(timeoutSec),
@@ -69,9 +76,20 @@ export function callFastModel(payload, config) {
     timeout: (timeoutSec + 2) * 1000,
   })
 
+  debugLog('API_RESPONSE', {
+    status: result.status,
+    error: result.error?.message ?? null,
+    stdout_preview: (result.stdout || '').slice(0, 2000),
+    stderr_preview: (result.stderr || '').slice(0, 500),
+  }, config)
+
   if (result.error || result.status !== 0) return null
 
-  return parseModelResponse(result.stdout)
+  const parsed = parseModelResponse(result.stdout)
+  if (!parsed) {
+    debugLog('PARSE_ERROR', { stdout_preview: (result.stdout || '').slice(0, 500) }, config)
+  }
+  return parsed
 }
 
 function circuitFile() {
@@ -94,7 +112,7 @@ export function checkCircuitBreaker() {
   return false
 }
 
-export function recordApiFailure() {
+export function recordApiFailure(config) {
   const file = circuitFile()
   let circuit = { failure_count: 0, last_failure_at: 0 }
   try {
@@ -109,14 +127,17 @@ export function recordApiFailure() {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     fs.writeFileSync(file, JSON.stringify(circuit))
   } catch {}
-  return circuit.failure_count >= CIRCUIT_THRESHOLD
+  const tripped = circuit.failure_count >= CIRCUIT_THRESHOLD
+  debugLog('CIRCUIT', { event: 'failure', failure_count: circuit.failure_count, tripped }, config)
+  return tripped
 }
 
-export function recordApiSuccess() {
+export function recordApiSuccess(config) {
   const file = circuitFile()
   try {
     if (fs.existsSync(file)) fs.unlinkSync(file)
   } catch {}
+  debugLog('CIRCUIT', { event: 'success', state: 'reset' }, config)
 }
 
 // drainWarning: merge pending auth warning into an emit object before writing stdout

@@ -12,6 +12,7 @@ import {
 } from './lib/api.mjs'
 import { redact } from './lib/privacy.mjs'
 import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from './lib/prompts.mjs'
+import { debugLog } from './lib/debug.mjs'
 
 function readStdin() {
   try {
@@ -93,10 +94,24 @@ function main() {
   const isRefine = rawPrompt.startsWith('::')
 
   // ③ shouldSkip check — bypass for :: refine so short commands like ":: fix" still work
-  if (!isRefine && shouldSkip(rawPrompt)) return
+  // config not yet loaded here; SKIP logging activates via MY_LINGO_DEBUG env only
+  if (!isRefine && shouldSkip(rawPrompt)) {
+    debugLog('SKIP', { preview: rawPrompt.slice(0, 100) })
+    return
+  }
 
   // ④ Load config
   const config = loadConfig(cwd)
+  debugLog('CONFIG', {
+    execution_mode: config.execution_mode,
+    model_fast: config.model_fast,
+    api_base_url: config.api_base_url,
+    timeout_seconds: config.timeout_seconds,
+    privacy_mode: config.privacy_mode,
+    native_language: config.native_language,
+    api_key: config.api_key ? '[SET]' : '[NOT SET]',
+    debug: config.debug,
+  }, config)
 
   // execution_mode off → pass through silently
   if (config.execution_mode === 'off') return
@@ -142,11 +157,11 @@ function main() {
     const redacted = redact(text, config.privacy_mode)
     const result = callFastModel(buildRefineMessages(redacted, config), config)
     if (!result) {
-      recordApiFailure()
+      recordApiFailure(config)
       emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
       return
     }
-    recordApiSuccess()
+    recordApiSuccess(config)
     try {
       writeTurn({
         prompt: text,
@@ -189,7 +204,7 @@ function main() {
   const latencyMs = Date.now() - startTime
 
   if (!result) {
-    const tripped = recordApiFailure()
+    const tripped = recordApiFailure(config)
     try {
       writeTurn({
         prompt: text,
@@ -210,7 +225,7 @@ function main() {
     return
   }
 
-  recordApiSuccess()
+  recordApiSuccess(config)
 
   // Use API's detected_input_language if available, else fall back to detection.lang (D4)
   const detectedLanguage = result.detected_input_language || detection.lang

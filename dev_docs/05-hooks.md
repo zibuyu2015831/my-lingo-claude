@@ -13,7 +13,7 @@
     "UserPromptSubmit": [
       {
         "matcher": "*",
-        "description": "Filter slash commands, pure code blocks, and short prompts inside the script. The hook skips: (1) prompts starting with '/', (2) prompts starting with '!', (3) prompts under 8 chars, (4) pure code blocks, (5) URL/command prefixes.",
+        "description": "Content-based filtering is impossible at the hook-config layer, so all filtering happens inside the script. The script skips: (1) slash commands starting with '/', (2) shell commands starting with '!' — EXCEPT '!raw' which is a My Lingo escape prefix handled before skip logic, (3) prompts under 8 chars, (4) pure code blocks, (5) URL/shell prefixes.",
         "hooks": [
           {
             "type": "command",
@@ -108,12 +108,32 @@ function emit(obj) {
 
 function main() {
   const input = readStdin()
-  const prompt = (input.prompt || '').trim()
+  const rawPrompt = (input.prompt || '').trim()
   const cwd = input.cwd || process.cwd()
-  const sessionId = input.session_id || null
+  const sessionId = input.session_id || process.env.CLAUDE_SESSION_ID || null
 
-  // 快速跳过检测
-  if (shouldSkip(prompt)) return
+  // ── 特殊前缀检测（必须在 shouldSkip 之前处理）──────────────────────
+  //
+  // !raw 前缀：跳过优化，仅记录，直接透传原始 prompt
+  // 注意：!raw 以 '!' 开头，shouldSkip 会将所有 '!' 开头视为 shell 命令跳过，
+  // 所以必须在 shouldSkip 之前单独拦截。
+  if (rawPrompt.startsWith('!raw')) {
+    const prompt = rawPrompt.slice(4).trimStart()
+    const config = loadConfig(cwd)
+    if (config.execution_mode !== 'off') {
+      const detection = detectLanguage(prompt || rawPrompt)
+      writeTurn({ prompt: prompt || rawPrompt, detection, sessionId, mode: 'raw', fallback: false }, config)
+      emit({ systemMessage: '[my-lingo] !raw: optimization skipped.' })
+    }
+    return
+  }
+
+  // :: 前缀：强制触发 refine 模式（精炼粗糙想法为精确 prompt）
+  const isRefine = rawPrompt.startsWith('::')
+  const prompt = isRefine ? rawPrompt.slice(2).trimStart() : rawPrompt
+
+  // ── 通用跳过检测 ──────────────────────────────────────────────────
+  if (shouldSkip(rawPrompt)) return
 
   // 读取配置
   const config = loadConfig(cwd)
@@ -129,8 +149,25 @@ function main() {
     writeTurn({ prompt, detection, sessionId, mode: 'original', fallback: false }, config)
     return
   }
+
+  // refine 模式：用 deep model（或 fast model）将粗糙想法重写为精确 prompt
+  if (isRefine) {
+    if (!prompt) {
+      emit({ decision: 'block', reason: 'Nothing to refine. Provide text after ::.' })
+      return
+    }
+    const result = callFastModel(buildPromptForRefine(prompt, config), config)
+    if (!result) {
+      emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
+      return
+    }
+    writeTurn({ prompt, detection, sessionId, mode: 'refine', executionPrompt: result.execution_prompt_en, fallback: false }, config)
+    const ctx = `IMPORTANT: The user used :: to request prompt refinement. Their refined intent is: ${result.execution_prompt_en}. Follow this refined prompt as the user's actual request.`
+    emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${result.execution_prompt_en}` })
+    return
+  }
   
-  // 需要优化的模式
+  // 需要优化的模式（english_optimized / original_with_english_context / preview）
   const redactedPrompt = redact(prompt, config.privacy_mode)
   const apiPayload = buildPromptForOptimization(redactedPrompt, detection, config)
   
@@ -139,7 +176,7 @@ function main() {
   const latencyMs = Date.now() - startTime
   
   if (!result) {
-    // Fallback
+    // Fallback：API 不可用，透传原始 prompt
     writeTurn({ prompt, detection, sessionId, mode: config.execution_mode, fallback: true, latencyMs }, config)
     if (config.fallback_policy === 'send_original') {
       emit({ systemMessage: '[my-lingo] API unavailable, sending original prompt.' })
@@ -147,7 +184,7 @@ function main() {
     return
   }
   
-  // 成功
+  // 成功：写入记录，注入 additionalContext
   writeTurn({
     prompt,
     detection,
@@ -220,7 +257,9 @@ function buildSystemMessage(result, detection, latencyMs, config) {
 
 ### 3.1 输入
 
-SessionEnd hook 的 stdin 包含会话信息（具体字段依 Claude Code 版本而定）。My Lingo 主要依赖 `session_id` 过滤本次会话的 turns。
+**SessionEnd hook 不通过 stdin 接收数据**（与 UserPromptSubmit 不同）。当前会话 ID 通过环境变量 `CLAUDE_SESSION_ID` 获取，历史数据通过读取今日 JSONL 文件获取。
+
+不读取 stdin 的原因：参考实现（`claude-english-buddy`）的 SessionEnd 完全不读 stdin，直接调用 `readToday()`。Claude Code 的 SessionEnd hook 可能不管道 stdin，强行读取会导致阻塞。
 
 ### 3.2 完整脚本结构
 
@@ -230,10 +269,11 @@ import process from 'node:process'
 import { readToday } from './lib/storage.mjs'
 
 function main() {
-  const input = JSON.parse(process.stdin.read() || '{}')
-  const sessionId = input.session_id || process.env.CLAUDE_SESSION_ID
+  // 从环境变量获取 session ID（不读 stdin — SessionEnd 可能无 stdin）
+  const sessionId = process.env.CLAUDE_SESSION_ID || null
   
   const allRecords = readToday()
+  // 过滤本次会话的记录；无 sessionId 时处理今日所有记录
   const records = sessionId
     ? allRecords.filter(r => r.session_id === sessionId)
     : allRecords
@@ -241,12 +281,12 @@ function main() {
   if (records.length === 0) return
   
   const optimized = records.filter(r => r.execution_prompt && !r.fallback)
-  const translated = records.filter(r => r.detection?.lang !== 'en' && !r.fallback)
-  const corrected = records.filter(r => r.detection?.lang === 'en' && !r.fallback)
+  const translated = records.filter(r => r.detected_language !== 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original')
+  const corrected = records.filter(r => r.detected_language === 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original')
   const fallbacks = records.filter(r => r.fallback)
-  const skipped = records.length - optimized.length - fallbacks.length
+  const raws = records.filter(r => r.mode === 'raw')
   
-  // 统计输出
+  // 统计输出到 stderr（终端可见，不干扰主流程）
   const parts = [`[my-lingo] Session: ${records.length} prompts`]
   if (optimized.length > 0) {
     const detail = []
@@ -254,7 +294,7 @@ function main() {
     if (corrected.length > 0) detail.push(`${corrected.length} corrected`)
     parts.push(`${optimized.length} optimized (${detail.join(', ')})`)
   }
-  if (skipped > 0) parts.push(`${skipped} skipped`)
+  if (raws.length > 0) parts.push(`${raws.length} !raw`)
   if (fallbacks.length > 0) parts.push(`${fallbacks.length} fallbacks`)
   
   process.stderr.write(parts.join(' | ') + '\n')
@@ -326,16 +366,20 @@ function shouldSkip(prompt) {
   if (prompt.startsWith('/')) return true
   
   // 2. shell 命令前缀（! 是 Claude Code 的 shell 执行语法）
+  //    ⚠️ 注意：!raw 前缀必须在调用 shouldSkip 之前单独处理，
+  //    否则会被这里误判为 shell 命令而跳过。
   if (prompt.startsWith('!')) return true
   
-  // 3. 过短（字符数 < 8）
-  if ([...prompt].length < 8) return true
+  // 3. 过短（字符数 < 8，同时词数 < 3，CJK 无空格所以用字符数兜底）
+  const charCount = [...prompt].length
+  const wordCount = prompt.split(/\s+/).filter(Boolean).length
+  if (charCount < 8 && wordCount < 3) return true
   
   // 4. 纯代码块
   if (/^```/.test(prompt.trim())) return true
   
-  // 5. URL 和常见命令前缀
-  if (/^(https?:|git@|ssh:\/\/|npm |pip |cargo |brew |sudo |cd |ls |cat |grep )/i.test(prompt)) {
+  // 5. URL 和常见 shell 命令前缀
+  if (/^(https?:|git@|ssh:\/\/|npm |pip |cargo |brew |sudo |cd |ls |cat |grep |docker |kubectl )/i.test(prompt)) {
     return true
   }
   
@@ -343,6 +387,17 @@ function shouldSkip(prompt) {
 }
 ```
 
-特殊前缀（不跳过，改变行为）：
-- `::` → 强制触发 refine 模式
-- `!raw` → 跳过优化，仅记录（这里 `!raw` 不是 shell 命令，需在 shouldSkip 之前单独处理）
+**特殊前缀处理顺序**（必须在 `shouldSkip` 之前）：
+
+| 前缀 | 行为 | 为何在 shouldSkip 前处理 |
+|------|------|------------------------|
+| `!raw` | 跳过优化，仅记录，透传原始 prompt | `!` 开头会被 shouldSkip 当 shell 命令跳过 |
+| `::` | 强制触发 refine 模式 | `::` 不会被 shouldSkip 拦截，但需要在检测语言之前解析出文本 |
+
+调用顺序：
+```javascript
+// main() 中的顺序（见 2.3 节）
+if (rawPrompt.startsWith('!raw')) { /* 处理 !raw，return */ }
+const isRefine = rawPrompt.startsWith('::')
+if (shouldSkip(rawPrompt)) return   // 此时 !raw 已被处理，不会误拦截
+```

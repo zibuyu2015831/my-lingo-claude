@@ -230,6 +230,32 @@ export function writeLearningItem(record, space) {
   const line = JSON.stringify({ ...record, ts: record.ts || new Date().toISOString() })
   fs.appendFileSync(monthPath('learning', space, 'items-'), line + '\n', 'utf8')
 }
+
+// 列出 turns/ 目录下所有已有数据的日期，升序排列
+// 用于：/my-lingo:status 显示总记录数、/my-lingo:errors 扫描历史
+export function listTurnDates() {
+  const dir = path.join(getDataDir(), 'turns')
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir)
+    .filter(f => f.endsWith('.jsonl'))
+    .map(f => f.replace('.jsonl', ''))
+    .sort()
+}
+
+// 读取最近 N 天的所有 turns 记录（含今天）
+export function readTurnsLastNDays(n) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - (n - 1))
+  return readTurnsForRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10))
+}
+
+// 统计所有历史 turns 的总记录数（用于 status 命令）
+export function countTotalTurns() {
+  return listTurnDates().reduce((sum, date) => {
+    return sum + readTurnsForDay(date).length
+  }, 0)
+}
 ```
 
 ---

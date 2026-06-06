@@ -21,19 +21,32 @@ My Lingo 使用 OpenAI-compatible API，支持任意兼容接口。
 
 ### 1.2 API Key 读取优先级
 
+My Lingo 调用的是外部 API（OpenAI / DeepSeek / 其他），API key 由用户自行管理，通过以下路径注入：
+
 ```javascript
 function getApiKey(config) {
-  // 1. 环境变量（最高优先级）
+  // 1. 环境变量（最高优先级，适合 CI / 高级用户）
   if (process.env.MY_LINGO_API_KEY) return process.env.MY_LINGO_API_KEY
   
-  // 2. Claude Code userConfig（plugin.json 中声明，Claude Code 加密存储）
+  // 2. config.json 中的 api_key 字段
+  //    由 /my-lingo:setup 向导写入 $CLAUDE_PLUGIN_DATA/my-lingo/config.json
+  //    该文件权限应设为 0o600（setup 脚本负责）
   if (config.api_key) return config.api_key
   
   return null
 }
 ```
 
-**不**从磁盘上的明文文件读取 API key。
+**API key 存储路径说明**：
+
+| 方式 | 路径 | 写入时机 | 安全性 |
+|------|------|---------|--------|
+| 环境变量 | `MY_LINGO_API_KEY` | 用户手动 export | 进程级隔离 |
+| config.json | `$CLAUDE_PLUGIN_DATA/my-lingo/config.json` | `/my-lingo:setup` 写入 | 文件权限 0o600 |
+
+**注意**：plugin.json 的 `userConfig` 字段（`"sensitive": true`）目前用于 Claude Code 向用户展示配置 UI，但运行时 hook 脚本**无法**自动读取 userConfig 值——hook 是独立 Node.js 进程，userConfig 不会作为环境变量注入。因此 API key 的实际存储必须走 config.json 或环境变量路径，不能依赖 userConfig 的自动注入。
+
+**不**从 git 可见的明文文件读取 API key（config.json 应加入 .gitignore）。
 
 ### 1.3 支持的 Provider
 
@@ -122,58 +135,112 @@ export function callFastModel(payload, config) {
   try {
     const response = JSON.parse(result.stdout)
     if (response.error) {
-      handleApiError(response.error, config)
+      handleApiError(response.error)
       return null
     }
     const content = response.choices?.[0]?.message?.content
-    return content ? JSON.parse(content) : null
+    if (!content) return null
+    return JSON.parse(content)
   } catch {
     return null
   }
 }
 
-function handleApiError(error, config) {
+// pending warning — drained on next emit()
+let _pendingWarning = null
+
+function handleApiError(error) {
   if (error.type === 'authentication_error') {
-    // 下次 hook 调用时会通过 systemMessage 展示
-    process.env._MY_LINGO_AUTH_ERROR = '1'
+    _pendingWarning = '[my-lingo] Authentication failed. Check your API key with /my-lingo:setup.'
   }
+}
+
+// 调用方在 emit() 前调用此函数，将待播 warning 合并进 systemMessage
+export function drainWarning(obj) {
+  if (!_pendingWarning) return obj
+  const msg = _pendingWarning
+  _pendingWarning = null
+  return { ...obj, systemMessage: obj.systemMessage ? `${msg}\n${obj.systemMessage}` : msg }
 }
 ```
 
 ### 3.2 熔断检查
 
+熔断器用于防止 API 连续失败时每次 prompt 都触发超时等待。**关键约束**：失败计数只跟踪"连续"失败；一次 API 成功必须重置计数。
+
 ```javascript
-export function checkCircuitBreaker(config) {
-  const circuitFile = path.join(getDataDir(), 'circuit.json')
-  if (!fs.existsSync(circuitFile)) return false  // 熔断器未触发
+import fs from 'node:fs'
+import path from 'node:path'
+import { getDataDir } from './storage.mjs'
+
+const CIRCUIT_THRESHOLD = 3     // 连续失败 N 次后触发熔断
+const COOLDOWN_MINUTES   = 5    // 熔断后冷却时间（分钟）
+
+function circuitFile() {
+  return path.join(getDataDir(), 'circuit.json')
+}
+
+// 检查是否处于熔断状态。返回 true 表示熔断中，应跳过 API 调用。
+export function checkCircuitBreaker() {
+  const file = circuitFile()
+  if (!fs.existsSync(file)) return false
   
-  const circuit = JSON.parse(fs.readFileSync(circuitFile, 'utf8'))
-  const cooldownMs = (config.circuit_breaker_cooldown_minutes || 5) * 60 * 1000
+  let circuit
+  try { circuit = JSON.parse(fs.readFileSync(file, 'utf8')) }
+  catch { return false }
   
+  const cooldownMs = COOLDOWN_MINUTES * 60 * 1000
   if (Date.now() - circuit.last_failure_at < cooldownMs) {
-    return true  // 熔断中，跳过 API 调用
+    return true  // 仍在冷却期，熔断中
   }
   
-  // 冷却期过，重置熔断器
-  fs.unlinkSync(circuitFile)
+  // 冷却期已过，自动重置
+  try { fs.unlinkSync(file) } catch {}
   return false
 }
 
-export function recordApiFailure(config) {
-  const circuitFile = path.join(getDataDir(), 'circuit.json')
+// API 调用失败时调用。返回 true 表示本次失败触发了熔断。
+export function recordApiFailure() {
+  const file = circuitFile()
   
   let circuit = { failure_count: 0, last_failure_at: 0 }
-  if (fs.existsSync(circuitFile)) {
-    circuit = JSON.parse(fs.readFileSync(circuitFile, 'utf8'))
-  }
+  try {
+    if (fs.existsSync(file)) {
+      circuit = JSON.parse(fs.readFileSync(file, 'utf8'))
+    }
+  } catch {}
   
   circuit.failure_count += 1
   circuit.last_failure_at = Date.now()
   
-  fs.writeFileSync(circuitFile, JSON.stringify(circuit))
+  try { fs.writeFileSync(file, JSON.stringify(circuit)) } catch {}
   
-  // 连续 3 次失败，触发熔断
-  return circuit.failure_count >= 3
+  return circuit.failure_count >= CIRCUIT_THRESHOLD
+}
+
+// API 调用成功时调用。重置连续失败计数（防止 "2失败→成功→1失败" 误触发熔断）。
+export function recordApiSuccess() {
+  const file = circuitFile()
+  if (fs.existsSync(file)) {
+    try { fs.unlinkSync(file) } catch {}
+  }
+}
+```
+
+**调用方式**（在 `callFastModel` 返回后）：
+
+```javascript
+const result = callFastModel(apiPayload, config)
+
+if (!result) {
+  const tripped = recordApiFailure()
+  if (tripped) {
+    emit({ systemMessage: '[my-lingo] Circuit breaker tripped — API paused for 5 min.' })
+  }
+  // fallback...
+} else {
+  recordApiSuccess()  // 成功后重置，确保连续失败计数清零
+  // 正常路径...
 }
 ```
 

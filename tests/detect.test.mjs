@@ -111,3 +111,30 @@ test('detectMode: mixed Chinese+English → non-english', () => {
   const result = detectMode('把 auth module 重构一下')
   assert.equal(result.mode, 'non-english')
 })
+
+// ── edge cases ──────────────────────────────────────────────────────────────
+
+test('detectLanguage: lang is strictly en or non-english', () => {
+  const inputs = ['hello world', '你好世界', '```code```', '']
+  for (const input of inputs) {
+    const { lang } = detectLanguage(input)
+    assert.ok(lang === 'en' || lang === 'non-english', `lang must be en or non-english, got: ${lang}`)
+  }
+})
+
+test('shouldSkip: git@ URL → true', () => {
+  assert.equal(shouldSkip('git@github.com:user/repo.git'), true)
+})
+
+test('shouldSkip: sudo command → true', () => {
+  assert.equal(shouldSkip('sudo apt install curl'), true)
+})
+
+test('shouldSkip: docker command → true', () => {
+  assert.equal(shouldSkip('docker run -it ubuntu bash'), true)
+})
+
+test('shouldSkip: 8-char prompt without word limit → false', () => {
+  // exactly 8 chars AND 1 word: charCount >= 8 so condition fails → not skipped
+  assert.equal(shouldSkip('abcdefgh'), false)
+})

@@ -83,3 +83,56 @@ export function getActiveSpace(spacesData) {
   const active = spaces.active || 'english'
   return (spaces.spaces || {})[active] || { ...DEFAULT_SPACE }
 }
+
+function getSpacesPath() {
+  return path.join(getDataDir(), 'spaces.json')
+}
+
+function writeSpaces(data) {
+  const spacesPath = getSpacesPath()
+  const tmp = spacesPath + '.tmp'
+  const dir = path.dirname(spacesPath)
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 })
+  fs.renameSync(tmp, spacesPath)
+}
+
+export function setActiveSpace(key) {
+  const data = loadSpaces()
+  if (!(key in data.spaces)) {
+    throw new Error(`Space '${key}' not found. Available: ${Object.keys(data.spaces).join(', ')}`)
+  }
+  data.active = key
+  writeSpaces(data)
+}
+
+export function addSpace(key, overrides = {}) {
+  const normalKey = key.toLowerCase()
+  const data = loadSpaces()
+  const now = new Date().toISOString()
+  const existing = data.spaces[normalKey] || {}
+  const displayName = normalKey.charAt(0).toUpperCase() + normalKey.slice(1)
+  const newSpace = {
+    key: normalKey,
+    display_name: displayName,
+    target_language: 'en',
+    native_language: 'zh-CN',
+    level: 'intermediate',
+    display_mode: 'compact',
+    auto_generate_learning: true,
+    created_at: existing.created_at || now,
+    ...overrides,
+    key: normalKey,
+    updated_at: now,
+  }
+  data.spaces[normalKey] = newSpace
+  writeSpaces(data)
+  return newSpace
+}
+
+export function removeSpace(key) {
+  const data = loadSpaces()
+  if (!(key in data.spaces)) return
+  delete data.spaces[key]
+  writeSpaces(data)
+}

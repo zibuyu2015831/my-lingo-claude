@@ -1,16 +1,29 @@
 # My Lingo v0.1 MVP — Implementation Plan
 
-> **使用方法**：将第一节的文字直接粘贴到 Claude Code 的 `/goal` 命令中。
-> Claude 将自主读取本文档、参考 `dev_docs/`，按阶段完成实施并验证。
+> **本文档结构**：
+> - **〔启动入口〕** — 给**操作者**使用，将其中的 `/goal` 指令文本复制到 Claude Code 命令行。
+> - **〔决策原则〕～〔十二〕** — 给**实施中的 Claude** 读取，是完整的规格书与约束体系。
 
 ---
 
-## 一、/goal 条件文本（直接粘贴使用）
+## 〔启动入口〕/goal 指令文本（复制粘贴到 Claude Code 的 /goal 命令）
 
 ```
 Read IMPLEMENTATION_PLAN.md in the project root and implement My Lingo v0.1 MVP as
-specified. Consult dev_docs/ for design details. Work Phase 0 → 5 in sequence,
-running npm test after each phase.
+specified. Consult dev_docs/ for design details. Work Phase 0 → 5 in sequence.
+
+── PHASE DISCIPLINE (repeat for EVERY phase) ──────────────────────────────────
+After completing each phase:
+  1. Run npm test — fix any failures before proceeding.
+  2. Review the code just written for obvious bugs, naming consistency,
+     and adherence to §决策原则 (decision principles in this document).
+  3. For any test that CANNOT run without external prerequisites (API key,
+     network, Claude session, etc.), add it to PENDING_TESTS.md instead of
+     skipping silently. Format: test description, exact repro command,
+     prerequisite needed, which phase introduced it.
+  4. Create a git commit with a short descriptive message covering the phase.
+     Commit only the files changed in this phase; do not batch phases.
+────────────────────────────────────────────────────────────────────────────────
 
 DONE when ALL of the following hold:
 
@@ -47,6 +60,13 @@ DONE when ALL of the following hold:
 
 7. A unit test exercises buildOptimizationMessages() + API-response parsing
    against a mocked JSON string (no network), and it passes under npm test.
+
+8. PENDING_TESTS.md exists and contains all tests deferred due to missing
+   prerequisites (API key, live session, etc.). If no tests were deferred,
+   the file exists with a note saying "No deferred tests."
+
+9. git log shows one commit per phase (Phase 0 through Phase 5), each with
+   a clear message. The final commit includes this DONE checklist verification.
 
 HARD CONSTRAINTS — never violate:
 - !raw and :: prefixes handled BEFORE shouldSkip() in user-prompt-submit.mjs
@@ -684,24 +704,146 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 
 ## 十一、测试策略
 
+### 11.1 测试体系总览
+
 **测试运行命令**：`npm test`（等价于 `node --test tests/*.test.mjs`）
 
-**测试隔离**：所有涉及文件 I/O 的测试必须用临时目录（`CLAUDE_PLUGIN_DATA` env var 覆盖），
-测试结束后清理。
+**测试框架**：Node.js 原生 `node:test` + `node:assert/strict`，**零额外依赖**（与零 npm 包约束一致）。
 
-**覆盖范围**：
+**测试隔离原则**：
+- 所有涉及文件 I/O 的测试用 `withTempData(fn)` 模式（见 §9.2），临时目录结束后清理。
+- 环境变量（`CLAUDE_PLUGIN_DATA`、`MY_LINGO_API_KEY` 等）在每个测试内设置/清理，**不依赖全局状态**（见 §决策原则 D6）。
+- **禁止触网络**：所有测试在无网络环境下必须通过。API 调用用预置 JSON 字符串 mock，不发 curl。
 
-| 文件 | 覆盖点 |
-|------|--------|
-| `detect.test.mjs` | 中文/英文/混合/slash/短/URL/npm/`!raw`处理前提；detectLanguage 返回 `{lang,ratio}` 且 lang∈{'en','non-english'} |
-| `storage.test.mjs` | writeTurn 落盘字段为 snake_case（断言 `detected_language`/`original_prompt` 等存在）/读取/空文件/日期列表/总计数/临时目录隔离 |
-| `privacy.test.mjs` | 6 类脱敏规则 + off 模式 + 技术词不误脱敏 |
-| `config.test.mjs` | 默认值/覆盖合并/写入权限 0o600/**缺失或坏 JSON 时不抛错、返回默认值** |
-| `prompts.test.mjs` | buildOptimizationMessages 产出合法 messages；解析 mock 的 `choices[0].message.content`（合法 JSON / 垃圾串两种）→ 对象 / null（DONE 校验项 7）|
+**阶段与测试文件对应关系**：
 
-`detected_language` 的端到端契约（writeTurn 落盘 → session-end 读取分流）建议在
-`storage.test.mjs` 里加一条断言：英文 turn 落盘 `detected_language==='en'`，
-非英文 turn 落盘非 `'en'` 值，防止 §9.1/§9.4 契约回归。
+| Phase | 新增测试文件 | 触发时机 |
+|-------|------------|---------|
+| Phase 0 | `detect.test.mjs`（骨架，至少 1 条） | Phase 0 结束前，确保 npm test 可通过 |
+| Phase 1 | `detect.test.mjs`（完整覆盖） | Phase 1 结束后 |
+| Phase 2 | `prompts.test.mjs` | Phase 2 结束后 |
+| Phase 3 | `config.test.mjs` | Phase 3 结束后 |
+| Phase 4 | `privacy.test.mjs` | Phase 4 结束后 |
+| Phase 5 | `storage.test.mjs`（补全） | Phase 5 结束后 |
+
+---
+
+### 11.2 各测试文件详细覆盖点
+
+#### `tests/detect.test.mjs`（Phase 1）
+
+| 测试用例 | 断言 |
+|---------|------|
+| 中文输入（"检查这个代码"）| `lang==='non-english'`, `ratio < 85` |
+| 纯英文输入 | `lang==='en'`, `ratio >= 85` |
+| 中英混合（"把 auth module 重构一下"）| `lang==='non-english'` |
+| Slash 命令（"/my-lingo:status"）| `shouldSkip===true` |
+| 短 prompt（"ok"）| `shouldSkip===true`（charCount<8 且 wordCount<3）|
+| URL（"https://example.com"）| `shouldSkip===true` |
+| npm 命令（"npm install lodash"）| `shouldSkip===true` |
+| 纯代码块（"```js\nfoo()"）| `shouldSkip===true` |
+| `!raw test` | `shouldSkip===true`（`!` 开头）；此用例同时文档化"!raw 必须在 shouldSkip 之前拦截"的前提 |
+| `detectLanguage` 返回形状 | `typeof result.lang === 'string'`，`lang∈{'en','non-english'}`，`typeof result.ratio === 'number'` |
+| 空字符串 / 空白串 | 不抛错，返回合法结构 |
+
+#### `tests/prompts.test.mjs`（Phase 2）
+
+| 测试用例 | 断言 |
+|---------|------|
+| `buildOptimizationMessages` 输出结构 | 返回 `{messages:[...]}`, `messages[0].role==='system'`, `messages[1].role==='user'` |
+| system prompt 包含全部 10 条规则 | 断言关键子串存在（"Do not change the user's intent"等）|
+| user message 包含原始 prompt | `messages[1].content` 含传入文本 |
+| `buildRefineMessages` 输出结构 | 同上，system prompt 含 refine 指令 |
+| `parseModelResponse` — 合法 JSON | 返回解析后的对象 |
+| `parseModelResponse` — 垃圾字符串 | 返回 `null`，不抛错 |
+| `parseModelResponse` — `response.error` 存在 | 返回 `null` |
+| `parseModelResponse` — `choices` 为空数组 | 返回 `null` |
+| 完整 mock 流程：mock stdout → parseModelResponse → `execution_prompt_en` | 断言取出字段值正确 |
+
+#### `tests/config.test.mjs`（Phase 3）
+
+| 测试用例 | 断言 |
+|---------|------|
+| 无 config.json 时返回 DEFAULT_CONFIG | `execution_mode==='english_optimized'`，`timeout_seconds===8` 等 |
+| 项目级 `.claude-my-lingo.json` 覆盖全局 config | 项目级字段优先 |
+| 全局 config.json 覆盖 DEFAULT_CONFIG | 全局字段优先于默认值 |
+| config.json 损坏（非法 JSON）时不抛错 | 返回默认值 |
+| `writeConfig` 写入文件内容正确 | JSON 可读取，字段匹配 |
+| `writeConfig` 文件权限为 0o600 | `fs.statSync(path).mode & 0o777 === 0o600` |
+| `writeConfig` 目录不存在时自动创建 | 目录存在且权限 0o700 |
+| `loadSpaces` 文件缺失时返回默认值 | `active==='english'` |
+
+#### `tests/privacy.test.mjs`（Phase 4）
+
+| 测试用例 | 断言 |
+|---------|------|
+| API key `sk-abc123...` → `[API_KEY]` | 精确匹配替换 |
+| Bearer token → `[API_KEY]` | |
+| GitHub token `ghp_xxx` → `[API_KEY]` | |
+| 数据库连接串密码 `postgres://user:pass@host/db` → 密码替换 | `:pass@` → `:[PASS]@` |
+| `password=secret123` → `password=[REDACTED]` | |
+| PEM 私钥块 → `[PRIVATE_KEY]` | |
+| `/home/alice/projects` → `/home/[USER]/projects` | |
+| `/Users/bob/code` → `/Users/[USER]/code` | |
+| `192.168.1.100` → `[PRIVATE_IP]` | |
+| `10.0.0.1` → `[PRIVATE_IP]` | |
+| `privacyMode: 'off'` 时原文不变 | `redact(text,'off') === text` |
+| 变量名/包名（`password_manager`、`sk-learn`）不被误脱敏 | 原文保留 |
+
+#### `tests/storage.test.mjs`（Phase 5）
+
+| 测试用例 | 断言 |
+|---------|------|
+| `writeTurn` 写入后 JSONL 文件存在 | |
+| 落盘字段为 snake_case | `record.session_id` / `record.original_prompt` / `record.detected_language` / `record.execution_prompt` / `record.latency_ms` 均存在 |
+| 英文 turn `detected_language==='en'` | schema 契约断言（防止 §9.1/§9.4 回归）|
+| 非英文 turn `detected_language` 不等于 `'en'` | |
+| `readTurnsForDay` 可读取写入内容 | 条目数、字段值一致 |
+| 无数据时 `readTurnsForDay` 返回空数组 | 不抛错 |
+| 多次 `writeTurn` 追加到同一文件 | 条目数累加 |
+| `listTurnDates` 多日期升序排列 | |
+| `countTotalTurns` 跨日期累计 | |
+| `writeTurn` 写失败（目录无权限）不抛错 | try/catch 包裹后静默返回 |
+| `withTempData` 模式：测试结束后目录被清理 | 临时目录不残留 |
+
+---
+
+### 11.3 后期测试文档（PENDING_TESTS.md）
+
+**目的**：记录开发过程中因缺少外部前提条件（API key、在线会话、真实 hook 环境）而**无法在 CI/npm test 中自动化**的测试项，供开发完成后统一手动验证。
+
+**文件位置**：项目根目录 `PENDING_TESTS.md`
+
+**由 Claude 在每个阶段维护**：每当遇到"此测试需要 API key / 真实网络 / Claude session 才能执行"时，立即将其追加到 `PENDING_TESTS.md`，**不得静默跳过**（违反 DONE 校验项 8）。
+
+**格式规范**（每条测试项）：
+
+```markdown
+## PT-NNN: <测试描述>
+
+- **引入阶段**：Phase N
+- **前提条件**：需要什么（例：MY_LINGO_API_KEY 环境变量、可达的 OpenAI API）
+- **复现命令**：
+  ```bash
+  export MY_LINGO_API_KEY=sk-...
+  echo '{"prompt":"检查这个代码"}' | node scripts/user-prompt-submit.mjs
+  ```
+- **预期结果**：stdout 包含 `additionalContext` 字段，`execution_prompt_en` 为英文句子
+- **验证状态**：`[ ]` 待验证 / `[x]` 已验证（填写日期）
+```
+
+**典型后期测试项**（Claude 应在对应阶段写入）：
+
+| 编号 | 内容 | 阶段 |
+|------|------|------|
+| PT-001 | API 调用成功时 `execution_prompt_en` 可正确解析 | Phase 2 |
+| PT-002 | API 连续失败 3 次触发熔断，第 4 次直接 fallback | Phase 2 |
+| PT-003 | API 恢复后 `circuit.json` 被删除、熔断重置 | Phase 2 |
+| PT-004 | `!raw` 前缀：API key 有效时仍跳过优化、仅记录 | Phase 5 |
+| PT-005 | `::` 前缀：refine 调用 API，返回精炼后的 prompt | Phase 5 |
+| PT-006 | SessionEnd hook 在真实会话结束时输出统计到 stderr | Phase 5 |
+| PT-007 | `setup.md` 完整流程：api_key 写入 config.json、权限 0o600 | Phase 3 |
+| PT-008 | authentication_error 时 systemMessage 包含 warning | Phase 2 |
 
 ---
 

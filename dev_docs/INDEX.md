@@ -99,8 +99,9 @@ my-lingo-claude/
 | 了解 MVP 范围、实现阶段划分、风险登记、验收清单 | [`10-mvp-roadmap.md`](./10-mvp-roadmap.md) |
 | 查询某个关键架构决策的背景和理由 | [`00-decisions.md`](./00-decisions.md) |
 | 运行集成测试、了解各用例原理、查看与 PENDING_TESTS.md 的差异 | [`11-integration-tests.md`](./11-integration-tests.md) |
-| 启动 v0.2 实现（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`../IMPLEMENTATION_PLAN_V0.2.md`](../IMPLEMENTATION_PLAN_V0.2.md) |
-| 启动 v0.3 实现（SRS 复习 + 课程生成 + 画像 + 导出）| [`../IMPLEMENTATION_PLAN_V0.3.md`](../IMPLEMENTATION_PLAN_V0.3.md) |
+| 查看 v0.1 实现计划（MVP 完整阶段）| [`./development/IMPLEMENTATION_PLAN_V0.1.md`](./development/IMPLEMENTATION_PLAN_V0.1.md) |
+| 查看 v0.2 实现计划（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`./development/IMPLEMENTATION_PLAN_V0.2.md`](./development/IMPLEMENTATION_PLAN_V0.2.md) |
+| 查看 v0.3 实现计划（SRS 复习 + 课程生成 + 画像 + 导出）| [`./development/IMPLEMENTATION_PLAN_V0.3.md`](./development/IMPLEMENTATION_PLAN_V0.3.md) |
 
 ---
 

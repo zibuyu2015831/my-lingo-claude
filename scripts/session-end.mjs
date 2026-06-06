@@ -1,6 +1,8 @@
 // SessionEnd hook — does NOT read stdin (D: SessionEnd may have no stdin pipe)
 import process from 'node:process'
-import { readTurnsForDay } from './lib/storage.mjs'
+import { readTurnsForDay, writeCorrection, writeLearningItem, writeSession } from './lib/storage.mjs'
+import { loadConfig, loadSpaces, getActiveSpace } from './lib/config.mjs'
+import { buildAnalysisMessages, callDeepModel } from './lib/analysis.mjs'
 
 function main() {
   try {
@@ -32,6 +34,53 @@ function main() {
     if (fallbacks.length) parts.push(`${fallbacks.length} fallbacks`)
 
     process.stderr.write(parts.join(' | ') + '\n')
+
+    // ── analysis (v0.2) ─────────────────────────────────────────────────────
+    try {
+      const config = loadConfig(process.cwd())
+      const spaces = loadSpaces()
+      const activeSpace = getActiveSpace(spaces)
+
+      const analysisTargets = records.filter(r =>
+        r.execution_prompt &&
+        !r.fallback &&
+        r.mode !== 'raw' &&
+        r.mode !== 'original'
+      )
+
+      const shouldAnalyze = activeSpace.auto_generate_learning !== false
+      if (!shouldAnalyze || !analysisTargets.length) return
+
+      const messages = buildAnalysisMessages(analysisTargets, config)
+      if (!messages) return
+      const result = callDeepModel(messages, config)
+      if (!result) return
+
+      const space = config.language_space ?? 'english'
+      for (const c of (result.corrections ?? [])) {
+        writeCorrection({ ...c, session_id: sessionId, turn_ref: null }, space)
+      }
+      for (const item of (result.learning_points ?? [])) {
+        writeLearningItem({ ...item, language_space: space }, space)
+      }
+
+      writeSession({
+        session_id: sessionId,
+        language_space: space,
+        total_prompts: records.length,
+        optimized: optimized.length,
+        translated: translated.length,
+        corrected: corrected.length,
+        fallbacks: fallbacks.length,
+        raws: raws.length,
+        top_errors: result.corrections?.slice(0, 3).map(c => ({
+          pattern: c.pattern ?? c.type,
+          count: 1,
+        })) ?? [],
+      })
+    } catch {
+      // analysis failures are silent
+    }
   } catch {
     // never throw — exit 0 always (D2)
   }

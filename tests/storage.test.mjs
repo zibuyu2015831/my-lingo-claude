@@ -9,6 +9,13 @@ import {
   listTurnDates,
   countTotalTurns,
   getDataDir,
+  writeCorrection,
+  readCorrections,
+  writeLearningItem,
+  readLearningItems,
+  writeSession,
+  listCorrectionMonths,
+  readRecentTurns,
 } from '../scripts/lib/storage.mjs'
 
 function withTempData(fn) {
@@ -210,4 +217,102 @@ test('withTempData: temp directory is cleaned up after test', () => {
     assert.ok(fs.existsSync(dir))
   })
   assert.ok(!fs.existsSync(capturedDir), `temp dir not cleaned up: ${capturedDir}`)
+})
+
+// ── v0.2: readCorrections ────────────────────────────────────────────────────
+
+const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
+
+test('writeCorrection + readCorrections: record is readable with correct fields', () => {
+  withTempData(() => {
+    const rec = { type: 'grammar', original: 'have bug', corrected: 'has a bug', explanation: 'test', pattern: 'subject-verb' }
+    writeCorrection(rec, 'english')
+    const results = readCorrections('english', [CURRENT_MONTH])
+    assert.ok(results.length >= 1, 'should have at least 1 correction')
+    const r = results[0]
+    assert.equal(r.type, 'grammar')
+    assert.equal(r.original, 'have bug')
+    assert.equal(r.pattern, 'subject-verb')
+  })
+})
+
+test('readCorrections: nonexistent month → empty array, no throw', () => {
+  withTempData(() => {
+    const results = readCorrections('english', ['1990-01'])
+    assert.ok(Array.isArray(results))
+    assert.equal(results.length, 0)
+  })
+})
+
+test('readCorrections: empty monthKeys → empty array', () => {
+  withTempData(() => {
+    const results = readCorrections('english', [])
+    assert.ok(Array.isArray(results))
+    assert.equal(results.length, 0)
+  })
+})
+
+// ── v0.2: readLearningItems ──────────────────────────────────────────────────
+
+test('writeLearningItem + readLearningItems: record is readable', () => {
+  withTempData(() => {
+    const rec = { type: 'phrase', target_text: 'identify bugs', native_explanation: 'test', language_space: 'english' }
+    writeLearningItem(rec, 'english')
+    const results = readLearningItems('english', [CURRENT_MONTH])
+    assert.ok(results.length >= 1)
+    assert.equal(results[0].target_text, 'identify bugs')
+  })
+})
+
+// ── v0.2: writeSession ───────────────────────────────────────────────────────
+
+test('writeSession: sessions file is created and contains session_id', () => {
+  withTempData((dir) => {
+    writeSession({ session_id: 'sess-test-001', language_space: 'english', total_prompts: 5, optimized: 3, translated: 1, corrected: 2, fallbacks: 0, raws: 0, top_errors: [] })
+    const today = new Date().toISOString().slice(0, 10)
+    const file = path.join(dir, 'my-lingo', 'sessions', `${today}.jsonl`)
+    assert.ok(fs.existsSync(file), `sessions file not found: ${file}`)
+    const content = fs.readFileSync(file, 'utf8')
+    assert.ok(content.includes('sess-test-001'), 'sessions file should contain session_id')
+  })
+})
+
+// ── v0.2: listCorrectionMonths ───────────────────────────────────────────────
+
+test('listCorrectionMonths: after writing corrections, returns array containing current month', () => {
+  withTempData(() => {
+    writeCorrection({ type: 'grammar', original: 'test', corrected: 'test2', explanation: 'e', pattern: 'p' }, 'english')
+    const months = listCorrectionMonths('english')
+    assert.ok(Array.isArray(months))
+    assert.ok(months.includes(CURRENT_MONTH), `months should include ${CURRENT_MONTH}, got: ${months}`)
+  })
+})
+
+test('listCorrectionMonths: directory missing → empty array, no throw', () => {
+  withTempData(() => {
+    const months = listCorrectionMonths('nonexistent-space')
+    assert.ok(Array.isArray(months))
+    assert.equal(months.length, 0)
+  })
+})
+
+// ── v0.2: readRecentTurns ────────────────────────────────────────────────────
+
+test('readRecentTurns(5): 8 turns written → returns 5', () => {
+  withTempData(() => {
+    for (let i = 0; i < 8; i++) {
+      writeTurn(BASE_INPUT, BASE_CONFIG)
+    }
+    const result = readRecentTurns(5)
+    assert.equal(result.length, 5)
+  })
+})
+
+test('readRecentTurns(0): returns empty array', () => {
+  withTempData(() => {
+    writeTurn(BASE_INPUT, BASE_CONFIG)
+    const result = readRecentTurns(0)
+    assert.ok(Array.isArray(result))
+    assert.equal(result.length, 0)
+  })
 })

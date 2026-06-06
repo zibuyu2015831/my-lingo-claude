@@ -119,3 +119,80 @@ export function writeLearningItem(record, space) {
     fs.appendFileSync(file, line + '\n', 'utf8')
   } catch {}
 }
+
+export function writeSession(record) {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const sessionsDir = path.join(getDataDir(), 'sessions')
+    ensureDir(sessionsDir)
+    const file = path.join(sessionsDir, `${today}.jsonl`)
+    const line = JSON.stringify({ ...record, ts: new Date().toISOString() })
+    fs.appendFileSync(file, line + '\n', 'utf8')
+  } catch {}
+}
+
+export function readCorrections(space, monthKeys) {
+  if (!monthKeys || monthKeys.length === 0) return []
+  const results = []
+  for (const month of monthKeys) {
+    try {
+      const file = path.join(getDataDir(), 'learning', space, `corrections-${month}.jsonl`)
+      if (!fs.existsSync(file)) continue
+      const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+      for (const line of lines) {
+        try { results.push(JSON.parse(line)) } catch {}
+      }
+    } catch {}
+  }
+  return results
+}
+
+export function readLearningItems(space, monthKeys) {
+  if (!monthKeys || monthKeys.length === 0) return []
+  const results = []
+  for (const month of monthKeys) {
+    try {
+      const file = path.join(getDataDir(), 'learning', space, `items-${month}.jsonl`)
+      if (!fs.existsSync(file)) continue
+      const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+      for (const line of lines) {
+        try { results.push(JSON.parse(line)) } catch {}
+      }
+    } catch {}
+  }
+  return results
+}
+
+export function listCorrectionMonths(space) {
+  try {
+    const dir = path.join(getDataDir(), 'learning', space)
+    if (!fs.existsSync(dir)) return []
+    const files = fs.readdirSync(dir)
+    const months = []
+    for (const file of files) {
+      const m = file.match(/^corrections-(\d{4}-\d{2})\.jsonl$/)
+      if (m) months.push(m[1])
+    }
+    return months.sort()
+  } catch {
+    return []
+  }
+}
+
+export function readRecentTurns(n) {
+  if (n <= 0) return []
+  try {
+    const dates = listTurnDates().slice().reverse()
+    const result = []
+    for (const date of dates) {
+      const turns = readTurnsForDay(date).slice().reverse()
+      for (const turn of turns) {
+        result.push(turn)
+        if (result.length >= n) return result
+      }
+    }
+    return result
+  } catch {
+    return []
+  }
+}

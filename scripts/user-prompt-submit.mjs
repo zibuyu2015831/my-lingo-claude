@@ -33,7 +33,7 @@ function emit(obj) {
 }
 
 function buildAdditionalContext(result, detection, config) {
-  const lang = detection.lang
+  const lang = result.detected_input_language || detection.lang
   const execPrompt = result.execution_prompt_en
   const summaryCtx = buildSummaryLanguageCtx(config)
   if (config.execution_mode === 'english_optimized' || config.execution_mode === 'preview') {
@@ -58,7 +58,8 @@ function buildAdditionalContext(result, detection, config) {
 }
 
 function buildSystemMessage(result, detection, latencyMs) {
-  const langLabel = detection.lang === 'en' ? 'refined' : `${detection.lang}→en`
+  const effectiveLang = result.detected_input_language || detection.lang
+  const langLabel = effectiveLang === 'en' ? 'refined' : `${effectiveLang}→en`
   const execPrompt = result.execution_prompt_en
   const truncated = execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt
   return `[my-lingo] ${langLabel} (${latencyMs}ms): ${truncated}`
@@ -227,7 +228,7 @@ function main() {
 
   recordApiSuccess(config)
 
-  // Use API's detected_input_language if available, else fall back to detection.lang (D4)
+  // Use API's detected_input_language if available, else fall back to local detection result
   const detectedLanguage = result.detected_input_language || detection.lang
 
   try {

@@ -20,7 +20,8 @@ Rules:
 3. Explain errors in the user's native language (${nativeLang}).
 4. Focus on patterns the user can remember and reuse.
 5. Be conservative — 3 corrections maximum, pick the most valuable ones.
-6. Output valid JSON only.`
+6. Output valid JSON only with this exact structure:
+{"corrections":[{"type":"grammar|word_choice|structure","original":"...","corrected":"...","explanation":"...","pattern":"..."}],"learning_points":[{"type":"phrase|sentence_pattern","target_text":"...","native_explanation":"..."}]}`
 
   const userLines = turns.map((t, i) => {
     const lang = t.detected_language || 'unknown'
@@ -65,6 +66,7 @@ export function parseAnalysisResponse(stdout) {
 
 export function callDeepModel(payload, config, opts = {}) {
   const jsonMode = opts.jsonMode !== false
+  const maxTimeSec = opts.maxTimeSeconds ?? 30
   const apiKey = getApiKey(config)
   if (!apiKey) return null
   if (!config || !config.api_base_url) return null
@@ -83,14 +85,14 @@ export function callDeepModel(payload, config, opts = {}) {
 
   const result = spawnSync('curl', [
     '-s',
-    '--max-time', '30',
+    '--max-time', String(maxTimeSec),
     `${config.api_base_url}/chat/completions`,
     '-H', 'content-type: application/json',
     '-H', `authorization: Bearer ${apiKey}`,
     '-d', JSON.stringify(bodyObj),
   ], {
     encoding: 'utf8',
-    timeout: 35000,
+    timeout: (maxTimeSec + 2) * 1000,
   })
 
   if (result.error || result.status !== 0) return null

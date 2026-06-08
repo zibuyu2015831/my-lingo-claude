@@ -22,13 +22,12 @@ export function writeTurn(input, config) {
     ensureDir(turnsDir)
     const file = path.join(turnsDir, `${today}.jsonl`)
 
-    // Map camelCase input to canonical snake_case schema (D4)
+    // Map camelCase input to canonical snake_case schema
     const record = {
       ts: new Date().toISOString(),
       session_id: input.sessionId ?? null,
       cwd: config.cwd ?? input.cwd ?? process.cwd(),
       language_space: config.language_space ?? 'english',
-      execution_mode: input.mode ?? null,
       mode: input.mode ?? null,
       detected_language: input.detectedLanguage
         ?? (input.detection?.lang ?? 'en'),

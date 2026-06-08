@@ -53,7 +53,7 @@ function main() {
 
       const messages = buildAnalysisMessages(analysisTargets, config)
       if (!messages) return
-      const result = callDeepModel(messages, config)
+      const result = callDeepModel(messages, config, { maxTimeSeconds: 12 })
       if (!result) return
 
       const space = config.language_space ?? 'english'

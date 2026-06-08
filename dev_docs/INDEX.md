@@ -38,7 +38,9 @@ my-lingo-claude/
 │       ├── status.md            # /my-lingo:status
 │       ├── last.md              # /my-lingo:last
 │       ├── mode.md              # /my-lingo:mode
-│       ├── setlang.md           # /my-lingo:setlang（切换语言空间）
+│       ├── use.md               # /my-lingo:use（切换语言空间）
+│       ├── space.md             # /my-lingo:space（查看当前空间配置）
+│       ├── spaces.md            # /my-lingo:spaces（列出所有语言空间）
 │       ├── recent.md            # /my-lingo:recent（近期纠错）
 │       ├── errors.md            # /my-lingo:errors（错误摘要）
 │       ├── purge.md             # /my-lingo:purge（清除旧数据）
@@ -72,6 +74,9 @@ my-lingo-claude/
 │   ├── storage.test.mjs
 │   ├── srs.test.mjs
 │   ├── lesson.test.mjs
+│   ├── analysis.test.mjs
+│   ├── spaces.test.mjs
+│   ├── debug.test.mjs
 │   └── integration/
 │       ├── mock-server.mjs      # 本地 HTTP mock server
 │       ├── helpers.mjs          # 临时目录、配置写入封装

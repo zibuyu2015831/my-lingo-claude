@@ -69,14 +69,14 @@ my-lingo-claude/
 
 ## 2. plugin.json
 
+**重要**：`commands/` 和 `hooks/hooks.json` 均由 Claude Code **自动发现**，不得在 `plugin.json` 中重复声明。若同时声明 `"hooks": "./hooks/hooks.json"`，Claude Code 会检测到"重复 hooks 文件"并报错（`failed to load · 1 error`）。只有当 hooks 文件位于非标准路径时才需要在此声明。
+
 ```json
 {
   "name": "my-lingo",
   "version": "0.1.0",
   "description": "A personal Claude Code language-learning and prompt-enhancement plugin. Optimizes your prompts to English and builds personalized language learning materials from your real coding interactions.",
   "author": "Zane",
-  "commands": "./commands",
-  "hooks": "./hooks/hooks.json",
   "userConfig": {
     "api_base_url": {
       "type": "string",

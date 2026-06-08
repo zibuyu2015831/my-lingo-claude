@@ -6,8 +6,6 @@
   "license": "MIT",
   "keywords": ["language-learning", "prompt-optimization", "non-native", "chinese", "translation", "developer-tools"],
   "category": "developer-tools",
-  "commands": "./commands",
-  "hooks": "./hooks/hooks.json",
   "userConfig": {
     "api_base_url": {
       "type": "string",

@@ -6,75 +6,60 @@ allowed-tools: Bash, Read
 
 ## Workflow
 
-Run the My Lingo setup wizard to configure your API key, model, and preferences.
+Check My Lingo configuration status and verify API connectivity. API credentials must be set as environment variables — they are never collected through this conversation.
 
-### Step 1: Check existing configuration
-
-```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
-CONFIG_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/config.json"
-if [ -f "$CONFIG_FILE" ]; then
-  echo "Existing config found:"
-  cat "$CONFIG_FILE" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); const s={...d}; if(s.api_key) s.api_key='****'+s.api_key.slice(-4); console.log(JSON.stringify(s,null,2))"
-  echo ""
-  echo "Proceed to overwrite? (yes/no)"
-fi
-```
-
-If the user says no, stop here.
-
-### Step 2: Collect configuration
-
-Ask the user for the following values (one at a time):
-
-1. **API Base URL** — e.g. `https://api.openai.com/v1` or `https://api.deepseek.com/v1`
-2. **API Key** — the secret key for that provider
-3. **Fast Model** — e.g. `gpt-4o-mini`, `deepseek-chat`, `claude-haiku-4-5-20251001`
-4. **Deep Model** (optional, press Enter to skip — defaults to fast model)
-5. **Native Language** — your native language code, e.g. `zh-CN`, `ja`, `ko` (default: `zh-CN`)
-6. **Execution Mode** — one of `english_optimized`, `original`, `off` (default: `english_optimized`)
-
-### Step 3: Write configuration securely
-
-Write the config via stdin (never pass api_key as a CLI argument):
+### Step 1: Check required environment variables
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
-CONFIG_DIR="$CLAUDE_PLUGIN_DATA/my-lingo"
-mkdir -p "$CONFIG_DIR"
-chmod 700 "$CONFIG_DIR"
-
-# Write config from stdin to avoid exposing api_key in process list
 node -e "
-const fs = require('fs');
-const raw = fs.readFileSync(0, 'utf8');
-const cfg = JSON.parse(raw);
-const dest = process.argv[1];
-fs.mkdirSync(require('path').dirname(dest), { recursive: true });
-fs.writeFileSync(dest, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-console.log('Config written to: ' + dest);
-" "$CONFIG_DIR/config.json" <<'CONFIG_EOF'
-{
-  "api_base_url": "USER_PROVIDED_URL",
-  "api_key": "USER_PROVIDED_KEY",
-  "model_fast": "USER_PROVIDED_MODEL",
-  "native_language": "zh-CN",
-  "execution_mode": "english_optimized",
-  "timeout_seconds": 8,
-  "fallback_policy": "send_original",
-  "privacy_mode": "standard",
-  "max_prompt_length": 4000
+const vars = [
+  { name: 'MY_LINGO_API_KEY',      label: 'API Key',      required: true  },
+  { name: 'MY_LINGO_API_BASE_URL', label: 'API Base URL', required: true  },
+  { name: 'MY_LINGO_MODEL_FAST',   label: 'Fast Model',   required: true  },
+  { name: 'MY_LINGO_MODEL_DEEP',   label: 'Deep Model',   required: false },
+];
+
+let allRequired = true;
+console.log('Environment variable status:');
+for (const v of vars) {
+  const val = process.env[v.name];
+  if (val) {
+    const display = v.name === 'MY_LINGO_API_KEY' ? '****' + val.slice(-4) : val;
+    console.log('  [OK] ' + v.name + ' = ' + display);
+  } else if (v.required) {
+    console.log('  [MISSING] ' + v.name + ' (required)');
+    allRequired = false;
+  } else {
+    console.log('  [optional, not set] ' + v.name + ' (defaults to MY_LINGO_MODEL_FAST)');
+  }
 }
-CONFIG_EOF
+
+if (!allRequired) {
+  console.log('');
+  console.log('Some required variables are not set. Set them using your platform method:');
+  console.log('');
+  console.log('  macOS / Linux (add to ~/.zshrc or ~/.bashrc):');
+  console.log('    export MY_LINGO_API_KEY=\"your-api-key\"');
+  console.log('    export MY_LINGO_API_BASE_URL=\"https://api.openai.com/v1\"');
+  console.log('    export MY_LINGO_MODEL_FAST=\"gpt-4o-mini\"');
+  console.log('    export MY_LINGO_MODEL_DEEP=\"gpt-4o\"  # optional');
+  console.log('');
+  console.log('  Windows: System Properties → Advanced → Environment Variables');
+  console.log('');
+  console.log('After setting variables, restart your terminal and re-run /my-lingo:setup.');
+  process.exit(1);
+}
+"
 ```
 
-Replace placeholders with actual user-provided values. **Never** pass the API key as a command-line argument.
+If the script exits with code 1, stop here and do not continue to the next steps.
 
-### Step 4: Initialize spaces.json
+### Step 2: Initialize spaces.json (if missing)
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
 SPACES_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/spaces.json"
+mkdir -p "$(dirname "$SPACES_FILE")"
 if [ ! -f "$SPACES_FILE" ]; then
   cat > "$SPACES_FILE" << 'SPACES_EOF'
 {
@@ -96,47 +81,81 @@ SPACES_EOF
 fi
 ```
 
-### Step 5: Verify API connectivity
-
-Test the API with a minimal request:
+### Step 3: Verify API connectivity
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
-API_URL=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CLAUDE_PLUGIN_DATA/my-lingo/config.json','utf8')); console.log(c.api_base_url)")
-MODEL=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CLAUDE_PLUGIN_DATA/my-lingo/config.json','utf8')); console.log(c.model_fast)")
-API_KEY=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CLAUDE_PLUGIN_DATA/my-lingo/config.json','utf8')); console.log(c.api_key||'')")
+node -e "
+const { spawnSync } = require('child_process');
+const apiUrl  = process.env.MY_LINGO_API_BASE_URL;
+const model   = process.env.MY_LINGO_MODEL_FAST;
+const apiKey  = process.env.MY_LINGO_API_KEY;
 
-RESPONSE=$(curl -s --max-time 10 "$API_URL/chat/completions" \
-  -H "content-type: application/json" \
-  -H "authorization: Bearer $API_KEY" \
-  -d "{\"model\":\"$MODEL\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"Say OK\"}]}")
+const body = JSON.stringify({
+  model,
+  max_tokens: 10,
+  messages: [{ role: 'user', content: 'Say OK' }],
+});
 
-echo "$RESPONSE" | node -e "
-const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
-if(d.error) { console.error('API error: '+d.error.message); process.exit(1); }
-if(d.choices?.[0]?.message?.content) console.log('API connection OK!');
-else { console.error('Unexpected response'); process.exit(1); }
+const result = spawnSync('curl', [
+  '-s', '--max-time', '10',
+  apiUrl + '/chat/completions',
+  '-H', 'content-type: application/json',
+  '-H', 'authorization: Bearer ' + apiKey,
+  '-d', body,
+], { encoding: 'utf8', timeout: 15000 });
+
+if (result.error || result.status !== 0) {
+  console.error('Connection failed: ' + (result.error?.message || 'curl error'));
+  process.exit(1);
+}
+
+let resp;
+try { resp = JSON.parse(result.stdout); } catch {
+  console.error('Invalid response from API');
+  process.exit(1);
+}
+
+if (resp.error) {
+  console.error('API error: ' + resp.error.message);
+  console.error('Check your MY_LINGO_API_KEY and MY_LINGO_API_BASE_URL.');
+  process.exit(1);
+}
+
+if (resp.choices?.[0]?.message?.content) {
+  console.log('API connection OK!');
+} else {
+  console.error('Unexpected response shape — verify MY_LINGO_MODEL_FAST is a valid model name.');
+  process.exit(1);
+}
 "
 ```
 
-If the test fails, show the error and advise the user to re-run setup. **Do not** write the config if the API test fails (but if the user skipped the test, write it anyway).
+If the connectivity test fails, stop here and advise the user to check their environment variables.
 
-### Step 6: Display configuration summary
-
-Show a summary of the saved configuration. **Never** display the full API key — show only the last 4 characters:
+### Step 4: Display configuration summary
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
 node -e "
-const fs = require('fs');
-const c = JSON.parse(fs.readFileSync('$CLAUDE_PLUGIN_DATA/my-lingo/config.json', 'utf8'));
-console.log('[my-lingo] Setup complete!');
-console.log('  API URL:   ' + c.api_base_url);
-console.log('  API Key:   ****' + (c.api_key||'').slice(-4));
-console.log('  Model:     ' + c.model_fast);
-console.log('  Mode:      ' + c.execution_mode);
-console.log('  Language:  ' + c.native_language);
+const CLAUDE_PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA
+  || require('path').join(require('os').homedir(), '.claude', 'plugins', 'data');
+const path = require('path');
+const fs   = require('fs');
+
+let spaces = { active: 'english' };
+try { spaces = JSON.parse(fs.readFileSync(path.join(CLAUDE_PLUGIN_DATA, 'my-lingo', 'spaces.json'), 'utf8')); } catch {}
+
+let cfg = {};
+try { cfg = JSON.parse(fs.readFileSync(path.join(CLAUDE_PLUGIN_DATA, 'my-lingo', 'config.json'), 'utf8')); } catch {}
+
 console.log('');
-console.log('Run /my-lingo:status to verify, or start using Claude Code normally.');
+console.log('[my-lingo] Setup complete!');
+console.log('  API URL:   ' + process.env.MY_LINGO_API_BASE_URL + '  (env)');
+console.log('  API Key:   ****' + (process.env.MY_LINGO_API_KEY || '').slice(-4) + '  (env)');
+console.log('  Model:     ' + process.env.MY_LINGO_MODEL_FAST + '  (env)');
+console.log('  Mode:      ' + (cfg.execution_mode || 'english_optimized'));
+console.log('  Language:  ' + (cfg.native_language || 'zh-CN'));
+console.log('  Space:     ' + (spaces.active || 'english'));
+console.log('');
+console.log('Run /my-lingo:status to verify at any time.');
 "
 ```

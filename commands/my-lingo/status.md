@@ -8,20 +8,11 @@ allowed-tools: Bash, Read, Glob
 
 Display the current My Lingo configuration and today's optimization statistics.
 
-### Step 1: Load configuration
+### Step 1: Load configuration and display status
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
-CONFIG_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/config.json"
-SPACES_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/spaces.json"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "[my-lingo] Not configured. Run /my-lingo:setup to get started."
-  exit 0
-fi
-
 node -e "
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 
 const dataDir = process.env.CLAUDE_PLUGIN_DATA
@@ -34,6 +25,15 @@ try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8'
 let spaces = { active: 'english' };
 try { spaces = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8')); } catch {}
 
+// API credentials come exclusively from environment variables
+const apiKey     = process.env.MY_LINGO_API_KEY;
+const apiBaseUrl = process.env.MY_LINGO_API_BASE_URL;
+const modelFast  = process.env.MY_LINGO_MODEL_FAST;
+
+function fmt(val) {
+  return val ? val + '  (env)' : '(not set) — run /my-lingo:setup';
+}
+
 const today = new Date().toISOString().slice(0, 10);
 const turnsFile = path.join(dataDir, 'turns', today + '.jsonl');
 let turns = [];
@@ -44,10 +44,9 @@ try {
 
 const optimized = turns.filter(r => r.execution_prompt && !r.fallback);
 const translated = turns.filter(r => r.detected_language !== 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
-const corrected = turns.filter(r => r.detected_language === 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
-const fallbacks = turns.filter(r => r.fallback);
+const corrected  = turns.filter(r => r.detected_language === 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
+const fallbacks  = turns.filter(r => r.fallback);
 
-// count all historical turns
 let total = 0;
 try {
   const turnsDir = path.join(dataDir, 'turns');
@@ -61,6 +60,8 @@ try {
   }
 } catch {}
 
+const apiKeyDisplay = apiKey ? '****' + apiKey.slice(-4) + '  (env)' : '(not set) — run /my-lingo:setup';
+
 console.log('');
 console.log('╔══════════════════════════════════════╗');
 console.log('║         My Lingo — Status            ║');
@@ -70,8 +71,9 @@ console.log('Configuration:');
 console.log('  Mode:        ' + (cfg.execution_mode || 'english_optimized'));
 console.log('  Language:    ' + (cfg.native_language || 'zh-CN'));
 console.log('  Space:       ' + (spaces.active || 'english'));
-console.log('  Model:       ' + (cfg.model_fast || '(not set)'));
-console.log('  API URL:     ' + (cfg.api_base_url || '(not set)'));
+console.log('  Model:       ' + fmt(modelFast));
+console.log('  API URL:     ' + fmt(apiBaseUrl));
+console.log('  API Key:     ' + apiKeyDisplay);
 console.log('  Privacy:     ' + (cfg.privacy_mode || 'standard'));
 console.log('');
 console.log('Today (' + today + '):');

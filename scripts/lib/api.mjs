@@ -11,9 +11,7 @@ const COOLDOWN_MINUTES = 5
 let _pendingWarning = null
 
 export function getApiKey(config) {
-  if (process.env.MY_LINGO_API_KEY) return process.env.MY_LINGO_API_KEY
-  if (config && config.api_key) return config.api_key
-  return null
+  return config?.api_key ?? null
 }
 
 export function parseModelResponse(stdout) {

@@ -256,25 +256,38 @@ export function countTotalTurns() {
 
 ### 4.1 config.json（全局配置）
 
+config.json 只存储**偏好类**字段，不存储 API 凭证。凭证通过环境变量提供（见下文）。
+
 ```json
 {
-  "api_base_url": "https://api.openai.com/v1",
-  "model_fast": "gpt-4o-mini",
-  "model_deep": "gpt-4o",
   "timeout_seconds": 8,
   "fallback_policy": "send_original",
   "execution_mode": "english_optimized",
   "native_language": "zh-CN",
   "privacy_mode": "standard",
   "max_prompt_length": 4000,
-  "circuit_breaker_cooldown_minutes": 5,
-  "auto_correct": true
+  "circuit_breaker_cooldown_minutes": 5
 }
 ```
 
-注意：`api_key` 存储在 config.json 中（权限 0o600），由 `/my-lingo:setup` 写入。运行时优先读取 `MY_LINGO_API_KEY` 环境变量，其次读取 `config.api_key`（见 `api.mjs` 的 `getApiKey()`）。
+### 4.2 API 凭证：环境变量
 
-### 4.2 spaces.json（语言空间）
+API 凭证必须通过环境变量配置，不得写入任何文件：
+
+| 环境变量 | 用途 | 是否必填 |
+|---------|------|---------|
+| `MY_LINGO_API_KEY` | API 认证密钥 | 必填 |
+| `MY_LINGO_API_BASE_URL` | API 端点，如 `https://api.openai.com/v1` | 必填 |
+| `MY_LINGO_MODEL_FAST` | 同步优化使用的快速模型 | 必填 |
+| `MY_LINGO_MODEL_DEEP` | 异步分析使用的深度模型 | 选填（默认等于 model_fast） |
+
+环境变量在 `loadConfig()` 中作为最高优先级（Layer 0）覆盖所有文件配置。`writeConfig()` 会在写入前自动过滤凭证字段，防止意外落地。
+
+**各平台配置方式：**
+- macOS / Linux：将 `export MY_LINGO_API_KEY=...` 写入 `~/.zshrc` 或 `~/.bashrc`
+- Windows：系统属性 → 高级 → 环境变量
+
+### 4.3 spaces.json（语言空间）
 
 ```json
 {
@@ -295,7 +308,7 @@ export function countTotalTurns() {
 }
 ```
 
-### 4.3 circuit.json（熔断器状态）
+### 4.4 circuit.json（熔断器状态）
 
 ```json
 {

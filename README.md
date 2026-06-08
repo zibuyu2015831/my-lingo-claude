@@ -80,7 +80,24 @@ Add the plugin directory to Claude Code's plugin configuration. In your Claude C
 
 The plugin is identified by `.claude-plugin/plugin.json` in the repository root.
 
-### 3. Run first-time setup
+### 3. Set API credentials as environment variables
+
+My Lingo never collects your API key through conversation. Set these variables using your platform's native method before running `/my-lingo:setup`:
+
+**macOS / Linux** — add to `~/.zshrc` or `~/.bashrc`, then `source` the file:
+
+```bash
+export MY_LINGO_API_KEY="your-api-key"
+export MY_LINGO_API_BASE_URL="https://api.openai.com/v1"   # or your provider's endpoint
+export MY_LINGO_MODEL_FAST="gpt-4o-mini"                   # e.g. deepseek-chat, llama3-8b
+export MY_LINGO_MODEL_DEEP="gpt-4o"                        # optional; defaults to MY_LINGO_MODEL_FAST
+```
+
+Any OpenAI-compatible provider works: OpenAI, DeepSeek, Groq, a local Ollama instance, etc.
+
+**Windows** — set via System Properties → Advanced → Environment Variables.
+
+### 4. Verify setup
 
 Open a Claude Code session and run:
 
@@ -88,16 +105,7 @@ Open a Claude Code session and run:
 /my-lingo:setup
 ```
 
-Claude will walk you through:
-
-1. **API Base URL** — e.g. `https://api.openai.com/v1` or your provider's endpoint
-2. **API Key** — stored locally in `$CLAUDE_PLUGIN_DATA/my-lingo/config.json` with permission `0600`
-3. **Fast model** — used for real-time prompt optimization (e.g. `gpt-4o-mini`, `deepseek-chat`)
-4. **Deep model** — used for lesson generation (optional; defaults to fast model)
-5. **Native language** — e.g. `zh-CN`, `ja`, `ko` (used for explanations)
-6. **Target language** — e.g. `en` (the language you're learning)
-
-After setup, My Lingo activates automatically — no restart needed.
+This checks that all required variables are set and tests API connectivity. My Lingo activates automatically after that — no restart needed.
 
 ---
 

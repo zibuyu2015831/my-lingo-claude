@@ -80,7 +80,24 @@ cd my-lingo-claude
 
 插件通过仓库根目录下的 `.claude-plugin/plugin.json` 识别。
 
-### 第三步：首次初始化配置
+### 第三步：以环境变量方式配置 API 凭证
+
+My Lingo 不会通过对话收集你的 API Key。请在运行 `/my-lingo:setup` 之前，用你所在平台的原生方式设置以下变量：
+
+**macOS / Linux** — 写入 `~/.zshrc` 或 `~/.bashrc`，然后 `source` 该文件：
+
+```bash
+export MY_LINGO_API_KEY="your-api-key"
+export MY_LINGO_API_BASE_URL="https://api.openai.com/v1"   # 或你的服务商地址
+export MY_LINGO_MODEL_FAST="gpt-4o-mini"                   # 如 deepseek-chat、llama3-8b
+export MY_LINGO_MODEL_DEEP="gpt-4o"                        # 可选，默认与 MODEL_FAST 相同
+```
+
+任意 OpenAI 兼容服务商均可使用：OpenAI、DeepSeek、Groq、本地 Ollama 等。
+
+**Windows** — 通过"系统属性 → 高级 → 环境变量"图形界面设置。
+
+### 第四步：验证配置
 
 打开 Claude Code 会话，运行：
 
@@ -88,16 +105,7 @@ cd my-lingo-claude
 /my-lingo:setup
 ```
 
-Claude 会引导你完成以下配置：
-
-1. **API Base URL** — 例如 `https://api.openai.com/v1` 或你的服务商地址
-2. **API Key** — 仅存储在本地 `$CLAUDE_PLUGIN_DATA/my-lingo/config.json`（权限 `0600`）
-3. **Fast Model** — 用于实时 Prompt 优化（如 `gpt-4o-mini`、`deepseek-chat`）
-4. **Deep Model** — 用于课程生成（可选，默认与 Fast Model 相同）
-5. **母语代码** — 例如 `zh-CN`（用于解释说明）
-6. **目标语言代码** — 例如 `en`（你正在学习的语言）
-
-配置完成后 My Lingo 即时生效，无需重启。
+此命令会检查所有必填变量是否已设置，并测试 API 连通性。完成后 My Lingo 即时生效，无需重启。
 
 ---
 

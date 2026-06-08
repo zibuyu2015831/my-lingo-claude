@@ -2,6 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getDataDir } from './storage.mjs'
 
+// These fields are only valid from environment variables — never read from or written to files
+const CREDENTIAL_FIELDS = new Set(['api_key', 'api_base_url', 'model_fast', 'model_deep'])
+
 const DEFAULT_CONFIG = {
   execution_mode: 'english_optimized',
   native_language: 'zh-CN',
@@ -37,9 +40,10 @@ export function loadConfig(cwd) {
   // Layer 4 (lowest): defaults
   let merged = { ...DEFAULT_CONFIG }
 
-  // Layer 3: global config
+  // Layer 3: global config (credential fields ignored — env vars are the only source)
   const globalPath = path.join(getDataDir(), 'config.json')
-  const globalCfg = safeReadJson(globalPath)
+  const rawGlobal = safeReadJson(globalPath)
+  const globalCfg = Object.fromEntries(Object.entries(rawGlobal).filter(([k]) => !CREDENTIAL_FIELDS.has(k)))
   merged = { ...merged, ...globalCfg }
 
   // Layer 2: active space overrides (from spaces.json)
@@ -51,12 +55,19 @@ export function loadConfig(cwd) {
   }
   merged.language_space = activeSpaceName
 
-  // Layer 1 (highest): project-level config
+  // Layer 1: project-level config (credential fields ignored)
   if (cwd) {
     const projectPath = path.join(cwd, '.claude-my-lingo.json')
-    const projectCfg = safeReadJson(projectPath)
+    const rawProject = safeReadJson(projectPath)
+    const projectCfg = Object.fromEntries(Object.entries(rawProject).filter(([k]) => !CREDENTIAL_FIELDS.has(k)))
     merged = { ...merged, ...projectCfg }
   }
+
+  // Layer 0 (highest): environment variable overrides for API credentials
+  if (process.env.MY_LINGO_API_KEY)      merged.api_key      = process.env.MY_LINGO_API_KEY
+  if (process.env.MY_LINGO_API_BASE_URL) merged.api_base_url = process.env.MY_LINGO_API_BASE_URL
+  if (process.env.MY_LINGO_MODEL_FAST)   merged.model_fast   = process.env.MY_LINGO_MODEL_FAST
+  if (process.env.MY_LINGO_MODEL_DEEP)   merged.model_deep   = process.env.MY_LINGO_MODEL_DEEP
 
   return merged
 }
@@ -65,7 +76,8 @@ export function writeConfig(config) {
   const dataDir = getDataDir()
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
   const configPath = path.join(dataDir, 'config.json')
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 })
+  const safeConfig = Object.fromEntries(Object.entries(config).filter(([k]) => !CREDENTIAL_FIELDS.has(k)))
+  fs.writeFileSync(configPath, JSON.stringify(safeConfig, null, 2), { mode: 0o600 })
 }
 
 export function loadSpaces() {

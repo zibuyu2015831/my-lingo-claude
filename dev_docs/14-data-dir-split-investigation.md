@@ -1,6 +1,6 @@
 # Data Dir Split — Hook 与 Slash Command 写读不同目录的排查记录
 
-> **状态**：✅ 根因已通过 live 系统实测确认（见 §〇.5），待决策修复方案
+> **状态**：✅ 根因已通过 live 系统实测 + 代码 grep 双重确认（见 §〇.5）。方案 F 已修正一处会致其半失效的代码陷阱（`plugin_root` 改用 `import.meta.url`，见测点 4 / B11）。**可进入实施**，仅卡在 2 个不可逆决策点（迁移方向 C vs F+D、`data.db` 合并策略）—— 见 §七.4 实施就绪度评估
 > **发现日期**：2026-06-08（2026-06-08 基于代码 + 运行环境复核并修订）
 > **影响范围**：**全部 16 个 slash command 都受影响**（不止最初认定的 4 个）。其中 `space / mode / use / setup` 4 个是"写错目录 / 读错目录"，另外 12 个只读命令同样读错目录，只是因为假目录里没有 `data.db` 而表现为"空数据"而非"报错"
 > **影响版本**：v0.5（commit `7ba2ffd` 修复了 module-resolution 崩溃，但**没有**修复数据目录分裂；见 §三 修订）
@@ -53,6 +53,13 @@ $ echo "DATA=[$CLAUDE_PLUGIN_DATA]"  →  DATA=[]
 ```text
 $ readlink -f ~/.claude/skills/my-lingo   →  /data/zibuyu/my_lingo_claude   (== 当前 cwd)
 ```
+
+### 测点 4 — Hook 进程也很可能没有 `CLAUDE_PLUGIN_ROOT` 环境变量（代码实测新增）
+
+`grep -rn CLAUDE_PLUGIN_ROOT scripts/` → **零命中**。即**没有任何 hook 脚本读 `process.env.CLAUDE_PLUGIN_ROOT`**；hook 之所以能定位脚本，纯靠 `hooks.json` 命令串里的 `${CLAUDE_PLUGIN_ROOT}` 被 Claude Code **模板展开**，与 hook node 进程内是否有这个环境变量**无关**。因此不能假设 hook 进程里 `process.env.CLAUDE_PLUGIN_ROOT` 非空 —— 按它与命令 bash 的对称性，**很可能同样为空**。
+
+- **对方案 F 的直接影响（关键）**：原 Plan F 草稿写 `plugin_root: process.env.CLAUDE_PLUGIN_ROOT`，若该 env 在 hook 进程为空，指针里的 `plugin_root` 就是 `undefined`，"命令定位模块"那半个目标**静默失效**。修正：`plugin_root` 必须由 `import.meta.url` 推导（`scripts/` 的上一级），这是 hook 进程内 100% 可靠、零环境依赖的自身定位。详见 §六-F 改后的代码与 B11。
+- **反面对照**：`CLAUDE_PLUGIN_DATA` 作为**真实环境变量**则有直接铁证 —— `hooks.json` 通篇**没有** `${CLAUDE_PLUGIN_DATA}`，而 hook 却写进了 skills-dir 真目录，唯一可能就是 `paths.mjs` 读到了 `process.env.CLAUDE_PLUGIN_DATA`。故 F 里 `data_dir: getDataDir()` 这半是稳的。
 
 ### 由此可纠正原文三处判断
 
@@ -349,29 +356,62 @@ export function getDataDir() {
 
 **做法**：
 
-1. Hook（`user-prompt-submit` 等，运行时 `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` 都在）在每次运行时，把解析好的两条绝对路径写进一个**固定的、与环境变量无关的位置**，例如：
+1. Hook（`user-prompt-submit` 等）在每次运行时，把解析好的两条绝对路径写进一个**固定的、与环境变量无关的位置**：
 
    ```javascript
-   // 在 hook 启动早期，env 还在时
+   import { fileURLToPath } from 'node:url'
+
+   // ⚠️ plugin_root 必须来自 import.meta.url，不能来自 process.env.CLAUDE_PLUGIN_ROOT！
+   // 代码已实测确认：没有任何 hook 脚本读 process.env.CLAUDE_PLUGIN_ROOT，
+   // hook 仅靠 hooks.json 里 ${CLAUDE_PLUGIN_ROOT} 的"命令串模板展开"定位自己，
+   // hook 进程内该 env 变量很可能与命令 bash 一样为空（见 §〇.5 测点 4 / B11）。
+   // import.meta.url 是 hook 进程内 100% 可靠、与环境变量无关的自身定位手段。
+   const here = path.dirname(fileURLToPath(import.meta.url))   // …/scripts
+   const pluginRoot = path.dirname(here)                       // …/<plugin root>
+
    const pointer = path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json')
-   fs.mkdirSync(path.dirname(pointer), { recursive: true })
-   fs.writeFileSync(pointer, JSON.stringify({
-     plugin_root: process.env.CLAUDE_PLUGIN_ROOT,
-     data_dir: getDataDir(),               // = CLAUDE_PLUGIN_DATA/my-lingo（真目录）
+   const payload = JSON.stringify({
+     plugin_root: pluginRoot,
+     data_dir: getDataDir(),               // = CLAUDE_PLUGIN_DATA/my-lingo（真目录，env 已实测可用）
      updated_at: new Date().toISOString(),
-   }, null, 2))
+   }, null, 2)
+   // 原子写 + 仅在内容变化时写，避免每条 prompt 都 rewrite（B7/B12）
+   try {
+     if (fs.readFileSync(pointer, 'utf8') === payload) return  // 已是最新，跳过
+   } catch {}
+   fs.mkdirSync(path.dirname(pointer), { recursive: true })
+   const tmp = pointer + '.tmp'
+   fs.writeFileSync(tmp, payload)
+   fs.renameSync(tmp, pointer)
    ```
 
-   注意指针文件本身写在**固定 fallback 目录**（不依赖任何变量），所以命令一定找得到它。
+   注意指针文件本身写在**固定 fallback 目录**（不依赖任何变量），所以命令一定找得到它。`updated_at` 参与 diff 会导致每次都写，可在比较时忽略该字段或干脆去掉它。
 
 2. `paths.mjs::getDataDir()` 与命令的"定位插件根"逻辑，按优先级回退：
    `CLAUDE_PLUGIN_DATA`（正规安装） → 读 `install.json.data_dir`（命令场景的主路径） → 探测 `-skills-dir`（方案 D 的兜底） → fallback 假目录。
    命令定位插件根同理优先读 `install.json.plugin_root`，省掉对 `CLAUDE_PLUGIN_ROOT` 的依赖。
 
+3. **命令侧引导片段（16 个 .md 的真正改动量）**。命令要先用纯 Node 内建（无需任何插件 import）读指针拿到 `ROOT`，再 import 插件模块。这段 boilerplate 因"读指针才能 import"的鸡生蛋约束**必须内联复制进每个命令**，无法抽成共享模块：
+
+   ```javascript
+   import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+   let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+   if (!ROOT) {
+     try {
+       const p = path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json');
+       ROOT = JSON.parse(fs.readFileSync(p, 'utf8')).plugin_root;
+     } catch {}
+   }
+   ROOT = ROOT || process.cwd();   // 最末兜底（仅开发期 cwd==源码时有效）
+   const { getDataDir } = await import(ROOT + '/scripts/lib/paths.mjs');
+   ```
+
+   → 这 16 处内联改动（不是只改 4 个）才是 F 的主要工作量；评估改动面时不要低估。
+
 | 维度 | 评估 |
 |------|------|
-| 修复彻底度 | ✅ 高。**同时解决两个子问题**：命令既能定位模块（plugin_root）又能定位数据目录（data_dir），且**不依赖命令进程的任何环境变量** |
-| 改动面 | hook 入口加几行 + `paths.mjs` 回退链 + 4 个内联命令改读指针 |
+| 修复彻底度 | ✅ 高。**同时解决两个子问题**：命令既能定位模块（plugin_root）又能定位数据目录（data_dir），且**不依赖命令进程的任何环境变量**。前提：`plugin_root` 用 `import.meta.url` 而非 `process.env.CLAUDE_PLUGIN_ROOT`（B11） |
+| 改动面 | hook 入口加约 10 行（含 import.meta.url 推导 + 原子写）+ `paths.mjs` 回退链 + **16 个命令**内联引导片段改读指针（不是 4 个 —— 12 个只读命令同样要去掉对 `CLAUDE_PLUGIN_ROOT` env 的隐性依赖，否则陌生 cwd 仍崩，B1）|
 | 副作用 | 指针可能**短暂过期**（首次安装后、hook 尚未跑过一次之前，命令读不到指针 → 退回方案 D 探测）。可接受：发一条 prompt 触发 hook 即自愈 |
 | 鲁棒性 | ✅ 不硬编码 `-skills-dir` 后缀，对未来命名方案变化免疫 |
 | 与未来发布兼容 | ✅ 正规安装时走第一优先级，指针分支为冗余兜底 |
@@ -407,6 +447,33 @@ export function getDataDir() {
 | B8 | **`CLAUDE_PLUGIN_DATA` 被全局强行设置后又装别的插件**（方案 B 的副作用） | 其他插件被骗到 `…/my-lingo-skills-dir/<other>/` | 不要用方案 B 做永久方案 |
 | B9 | **`getDb()` 句柄缓存** | db.mjs 多半按路径缓存连接；同一进程内 `getDataDir()` 是确定值，无碍 | 若 F 让 `getDataDir()` 读指针，注意**不要每次 stat**，可在进程内缓存一次解析结果 |
 | B10 | **指针文件被用户手动删除 / 损坏** | 命令读 JSON 失败 | F 的读取要 `try/catch` 退回探测，不能因指针坏了就崩 |
+| B11 | **Hook 进程内 `process.env.CLAUDE_PLUGIN_ROOT` 也为空**（代码实测：无脚本读它，仅靠 hooks.json 模板展开定位） | 若 F 用 `process.env.CLAUDE_PLUGIN_ROOT` 写指针，`plugin_root` 会是 `undefined` | F 的 `plugin_root` **必须**来自 `import.meta.url`（`scripts/` 上级），不得依赖该 env；见 §〇.5 测点 4 |
+| B12 | **指针写入频率**：F 的 hook 每条 prompt 都触发 `user-prompt-submit` | 每次都 rewrite `install.json` 是无谓 IO，且非原子写可能被并发命令读到半截 | 用 `tmp + rename` 原子写，并"内容未变则跳过"（忽略 `updated_at` 或去掉它）；见 §六-F 代码 |
+
+## 七.4、实施就绪度评估（2026-06-08 新增）
+
+**结论：根因与方案方向已完全坐实，可以进入实施；但落地前还卡在 2 个"必须先定"的决策点（见 §七.5 的 1、2），以及 1 个已在本轮修正的代码陷阱。**
+
+✅ **已就绪（可直接动手）的部分**：
+- 根因（两类进程的环境变量可见性不对称）—— live 实测 + 代码 grep 双重坐实，无悬念。
+- 主方案 F 的机制（hook 落指针、命令读指针）—— 自洽、对未来命名变化免疫。
+- B1–B12 边界已枚举，每条都有明确的"对修复的要求"。
+- 测试缺口已定位（PT-013 显式设两变量 → 屏蔽了生产失败面），补法明确。
+
+⚠️ **本轮已修正、否则会导致 F 半失效的陷阱**（已写入 §六-F / §〇.5 测点 4 / B11）：
+- `plugin_root` 原打算取 `process.env.CLAUDE_PLUGIN_ROOT` —— 代码实测无任何 hook 读它，hook 进程内很可能也为空 → 改用 `import.meta.url`。**这是 F 能否成立的关键单点，已修正。**
+
+🚧 **进实施前仍需先拍板（阻塞项）**：
+- **D1**：走 **F+D 组合**（保留软链开发形态）还是 **方案 C 转正规安装**（根除 `-skills-dir`）？二者数据迁移脚本不同，先定方向再写代码。
+- **D2**：`data.db` 合并策略 —— 确认"按主键去重 INSERT、两目录全量纳入"（§七.5-2/B4）。这决定一次性迁移脚本怎么写，且**不可逆**，必须先确认。
+
+📋 **建议的实施顺序（方向定了之后）**：
+1. 先写**数据合并脚本**并备份两目录（最高风险、不可逆，先做完验证）。
+2. 改 `paths.mjs` 回退链（F+D），加单测覆盖"无 env / 指针存在 / 指针损坏 / 双 db 选优"。
+3. hook 入口加指针写入（import.meta.url + 原子写）。
+4. 16 个命令换引导片段；`mode/use/setup` 顺带改原子写（B7）。
+5. 补 PT-013"无两变量 + 陌生 cwd"用例 + "写后读回同目录"断言。
+6. 跑全量 222+12 测试 + 手动在 `/tmp` 下复现 B1 验证不再崩。
 
 ## 七.5、待用户决策的问题
 

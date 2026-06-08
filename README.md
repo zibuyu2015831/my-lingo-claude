@@ -38,7 +38,7 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 
 | Command | What it does |
 |---------|-------------|
-| `/my-lingo:setup` | First-time configuration: API endpoint, key, model, language |
+| `/my-lingo:setup` | Check env var status and verify API connectivity |
 | `/my-lingo:status` | Current config, active language space, today's stats |
 | `/my-lingo:last` | Show the original → optimized diff for your last prompt |
 | `/my-lingo:mode` | Switch execution mode (optimized / raw / off / …) |

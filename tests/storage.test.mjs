@@ -14,6 +14,7 @@ import {
   writeLearningItem,
   readLearningItems,
   writeSession,
+  readSession,
   listCorrectionMonths,
   readRecentTurns,
   listItemMonths,
@@ -21,7 +22,14 @@ import {
   readItemsDue,
   writeResponseRecord,
   readResponsesForSession,
+  readUnanalyzedTurns,
+  markTurnsAnalyzed,
+  purgeSpace,
+  purgeAll,
+  countTurnsForSpace,
+  countCorrectionsForSpace,
 } from '../scripts/lib/storage.mjs'
+import { resetDb } from '../scripts/lib/db.mjs'
 
 function withTempData(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ml-stor-test-'))
@@ -30,6 +38,7 @@ function withTempData(fn) {
   try {
     fn(dir)
   } finally {
+    resetDb() // close singleton before the dir it points at is removed
     process.env.CLAUDE_PLUGIN_DATA = prev !== undefined ? prev : undefined
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA
     fs.rmSync(dir, { recursive: true, force: true })
@@ -56,11 +65,12 @@ const BASE_CONFIG = {
 
 // ── writeTurn + readTurnsForDay ──────────────────────────────────────────────
 
-test('writeTurn: JSONL file is created after write', () => {
+test('writeTurn: data.db is created after write', () => {
   withTempData((dir) => {
     writeTurn(BASE_INPUT, BASE_CONFIG)
-    const file = path.join(dir, 'my-lingo', 'turns', `${TODAY}.jsonl`)
-    assert.ok(fs.existsSync(file), `JSONL file not found: ${file}`)
+    const file = path.join(dir, 'my-lingo', 'data.db')
+    assert.ok(fs.existsSync(file), `data.db not found: ${file}`)
+    assert.equal(readTurnsForDay(TODAY).length, 1)
   })
 })
 
@@ -121,6 +131,14 @@ test('writeTurn: fallback field is boolean', () => {
   })
 })
 
+test('writeTurn: non-fallback record reads fallback === false', () => {
+  withTempData(() => {
+    writeTurn(BASE_INPUT, BASE_CONFIG)
+    const [record] = readTurnsForDay(TODAY)
+    assert.equal(record.fallback, false)
+  })
+})
+
 test('writeTurn: multiple appends accumulate', () => {
   withTempData(() => {
     writeTurn(BASE_INPUT, BASE_CONFIG)
@@ -161,12 +179,11 @@ test('listTurnDates: empty when no data', () => {
 })
 
 test('listTurnDates: returns dates in ascending order', () => {
-  withTempData((dir) => {
-    const turnsDir = path.join(dir, 'my-lingo', 'turns')
-    fs.mkdirSync(turnsDir, { recursive: true })
-    fs.writeFileSync(path.join(turnsDir, '2026-06-03.jsonl'), '{"ts":"t","session_id":null,"cwd":"/","language_space":"english","mode":"original","detected_language":"en","original_prompt":"p","execution_prompt":null,"rewrite_type":null,"latency_ms":null,"fallback":false,"fallback_reason":null}\n')
-    fs.writeFileSync(path.join(turnsDir, '2026-06-01.jsonl'), '{"ts":"t","session_id":null,"cwd":"/","language_space":"english","mode":"original","detected_language":"en","original_prompt":"p","execution_prompt":null,"rewrite_type":null,"latency_ms":null,"fallback":false,"fallback_reason":null}\n')
-    fs.writeFileSync(path.join(turnsDir, '2026-06-02.jsonl'), '{"ts":"t","session_id":null,"cwd":"/","language_space":"english","mode":"original","detected_language":"en","original_prompt":"p","execution_prompt":null,"rewrite_type":null,"latency_ms":null,"fallback":false,"fallback_reason":null}\n')
+  withTempData(() => {
+    // seed turns across three days via the ts test-seam (writeTurn honors input.ts)
+    writeTurn({ ...BASE_INPUT, ts: '2026-06-03T10:00:00.000Z' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, ts: '2026-06-01T10:00:00.000Z' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, ts: '2026-06-02T10:00:00.000Z' }, BASE_CONFIG)
     const dates = listTurnDates()
     assert.deepEqual(dates, ['2026-06-01', '2026-06-02', '2026-06-03'])
   })
@@ -184,16 +201,33 @@ test('countTotalTurns: counts across multiple days', () => {
   withTempData(() => {
     writeTurn(BASE_INPUT, BASE_CONFIG)
     writeTurn(BASE_INPUT, BASE_CONFIG)
-
-    // write a second day manually
-    const dir = getDataDir()
-    const turnsDir = path.join(dir, 'turns')
-    fs.mkdirSync(turnsDir, { recursive: true })
-    const line = JSON.stringify({ ...BASE_INPUT, ts: new Date().toISOString() }) + '\n'
-    fs.appendFileSync(path.join(turnsDir, '2026-01-01.jsonl'), line)
-
+    writeTurn({ ...BASE_INPUT, ts: '2026-01-01T10:00:00.000Z' }, BASE_CONFIG)
     const total = countTotalTurns()
-    assert.ok(total >= 3, `expected at least 3, got ${total}`)
+    assert.equal(total, 3)
+  })
+})
+
+// ── countTurnsForSpace / countCorrectionsForSpace (slash-command stats) ───────
+
+test('countTurnsForSpace: counts only the given space', () => {
+  withTempData(() => {
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'english' })
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'english' })
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'spanish' })
+    assert.equal(countTurnsForSpace('english'), 2)
+    assert.equal(countTurnsForSpace('spanish'), 1)
+    assert.equal(countTurnsForSpace('french'), 0)
+  })
+})
+
+test('countCorrectionsForSpace: counts only the given space', () => {
+  withTempData(() => {
+    writeCorrection({ type: 'grammar', original: 'I has', corrected: 'I have' }, 'english')
+    writeCorrection({ type: 'grammar', original: 'he go', corrected: 'he goes' }, 'english')
+    writeCorrection({ type: 'gender', original: 'el casa', corrected: 'la casa' }, 'spanish')
+    assert.equal(countCorrectionsForSpace('english'), 2)
+    assert.equal(countCorrectionsForSpace('spanish'), 1)
+    assert.equal(countCorrectionsForSpace('french'), 0)
   })
 })
 
@@ -201,15 +235,11 @@ test('countTotalTurns: counts across multiple days', () => {
 
 test('writeTurn: write failure does not throw', () => {
   withTempData((dir) => {
-    // make turns dir read-only to force write failure
-    const turnsDir = path.join(dir, 'my-lingo', 'turns')
-    fs.mkdirSync(turnsDir, { recursive: true })
-    fs.chmodSync(turnsDir, 0o444)
-    try {
-      assert.doesNotThrow(() => writeTurn(BASE_INPUT, BASE_CONFIG))
-    } finally {
-      fs.chmodSync(turnsDir, 0o755)
-    }
+    // Block DB creation: place a regular file where the data dir should be, so
+    // getDb()'s mkdir of that path fails. writeTurn must swallow the error.
+    resetDb()
+    fs.writeFileSync(path.join(dir, 'my-lingo'), 'not-a-dir')
+    assert.doesNotThrow(() => writeTurn(BASE_INPUT, BASE_CONFIG))
   })
 })
 
@@ -271,14 +301,32 @@ test('writeLearningItem + readLearningItems: record is readable', () => {
 
 // ── v0.2: writeSession ───────────────────────────────────────────────────────
 
-test('writeSession: sessions file is created and contains session_id', () => {
-  withTempData((dir) => {
+test('writeSession: session is readable and contains session_id', () => {
+  withTempData(() => {
     writeSession({ session_id: 'sess-test-001', language_space: 'english', total_prompts: 5, optimized: 3, translated: 1, corrected: 2, fallbacks: 0, raws: 0, top_errors: [] })
-    const today = new Date().toISOString().slice(0, 10)
-    const file = path.join(dir, 'my-lingo', 'sessions', `${today}.jsonl`)
-    assert.ok(fs.existsSync(file), `sessions file not found: ${file}`)
-    const content = fs.readFileSync(file, 'utf8')
-    assert.ok(content.includes('sess-test-001'), 'sessions file should contain session_id')
+    const row = readSession('sess-test-001')
+    assert.ok(row, 'session row should exist')
+    assert.equal(row.session_id, 'sess-test-001')
+    assert.equal(row.total_prompts, 5)
+    assert.ok(Array.isArray(row.top_errors), 'top_errors should round-trip to an array')
+  })
+})
+
+test('writeSession: top_errors round-trips through JSON', () => {
+  withTempData(() => {
+    writeSession({ session_id: 'sess-te', language_space: 'english', total_prompts: 1, optimized: 1, translated: 0, corrected: 1, fallbacks: 0, raws: 0, top_errors: [{ pattern: 'tense', count: 2 }] })
+    const row = readSession('sess-te')
+    assert.equal(row.top_errors[0].pattern, 'tense')
+    assert.equal(row.top_errors[0].count, 2)
+  })
+})
+
+test('writeSession: same session_id replaces rather than duplicates', () => {
+  withTempData(() => {
+    writeSession({ session_id: 'sess-dup', language_space: 'english', total_prompts: 1, optimized: 1, translated: 0, corrected: 0, fallbacks: 0, raws: 0, top_errors: [] })
+    writeSession({ session_id: 'sess-dup', language_space: 'english', total_prompts: 9, optimized: 9, translated: 0, corrected: 0, fallbacks: 0, raws: 0, top_errors: [] })
+    const row = readSession('sess-dup')
+    assert.equal(row.total_prompts, 9, 'second write should overwrite')
   })
 })
 
@@ -293,7 +341,7 @@ test('listCorrectionMonths: after writing corrections, returns array containing 
   })
 })
 
-test('listCorrectionMonths: directory missing → empty array, no throw', () => {
+test('listCorrectionMonths: missing space → empty array, no throw', () => {
   withTempData(() => {
     const months = listCorrectionMonths('nonexistent-space')
     assert.ok(Array.isArray(months))
@@ -310,6 +358,15 @@ test('readRecentTurns(5): 8 turns written → returns 5', () => {
     }
     const result = readRecentTurns(5)
     assert.equal(result.length, 5)
+  })
+})
+
+test('readRecentTurns: returns most recent first', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, prompt: 'first' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, prompt: 'second' }, BASE_CONFIG)
+    const result = readRecentTurns(2)
+    assert.equal(result[0].original_prompt, 'second')
   })
 })
 
@@ -334,7 +391,7 @@ test('listItemMonths: after writing items, returns array containing current mont
   })
 })
 
-test('listItemMonths: directory missing → empty array, no throw', () => {
+test('listItemMonths: missing space → empty array, no throw', () => {
   withTempData(() => {
     const months = listItemMonths('nonexistent-space')
     assert.ok(Array.isArray(months))
@@ -342,38 +399,36 @@ test('listItemMonths: directory missing → empty array, no throw', () => {
   })
 })
 
-// ── v0.3: updateLearningItemReview ──────────────────────────────────────────
+// ── v0.3: updateLearningItemReview (by id) ───────────────────────────────────
 
 test('updateLearningItemReview: updates matching item review_count and next_review', () => {
   withTempData(() => {
-    const now = new Date().toISOString()
-    const rec = { ts: now, type: 'phrase', target_text: 'test phrase', native_explanation: 'foo', review_count: 0, next_review: null }
-    writeLearningItem(rec, 'english')
-    updateLearningItemReview('english', CURRENT_MONTH, now, 1)
-    const items = readLearningItems('english', [CURRENT_MONTH])
-    const updated = items.find(i => i.ts === now)
+    writeLearningItem({ type: 'phrase', target_text: 'test phrase', native_explanation: 'foo', review_count: 0, next_review: null }, 'english')
+    const [item] = readItemsDue('english')
+    assert.ok(item && item.id, 'seeded item should have an id')
+    updateLearningItemReview(item.id, 1)
+    const updated = readLearningItems('english', [CURRENT_MONTH]).find(i => i.id === item.id)
     assert.ok(updated, 'item should still exist')
     assert.equal(updated.review_count, 1)
     assert.ok(updated.next_review !== null, 'next_review should be set')
+    assert.ok(updated.interval_days >= 1, 'interval_days should be set')
   })
 })
 
-test('updateLearningItemReview: ts not found → other items unchanged', () => {
+test('updateLearningItemReview: id not found → other items unchanged', () => {
   withTempData(() => {
-    const now = new Date().toISOString()
-    const rec = { ts: now, type: 'phrase', target_text: 'unchanged', native_explanation: 'bar', review_count: 0, next_review: null }
-    writeLearningItem(rec, 'english')
-    updateLearningItemReview('english', CURRENT_MONTH, 'nonexistent-ts', 5)
-    const items = readLearningItems('english', [CURRENT_MONTH])
-    const item = items.find(i => i.ts === now)
-    assert.ok(item, 'original item should still exist')
-    assert.equal(item.review_count, 0, 'review_count should not change')
+    writeLearningItem({ type: 'phrase', target_text: 'unchanged', native_explanation: 'bar', review_count: 0, next_review: null }, 'english')
+    const [item] = readItemsDue('english')
+    updateLearningItemReview(999999, 5)
+    const it = readLearningItems('english', [CURRENT_MONTH]).find(i => i.id === item.id)
+    assert.ok(it, 'original item should still exist')
+    assert.equal(it.review_count, 0, 'review_count should not change')
   })
 })
 
-test('updateLearningItemReview: missing file → no throw', () => {
+test('updateLearningItemReview: nonexistent id → no throw', () => {
   withTempData(() => {
-    assert.doesNotThrow(() => updateLearningItemReview('english', '2000-01', 'fake-ts', 1))
+    assert.doesNotThrow(() => updateLearningItemReview(999999, 1))
   })
 })
 
@@ -381,8 +436,7 @@ test('updateLearningItemReview: missing file → no throw', () => {
 
 test('readItemsDue: item with null next_review is returned', () => {
   withTempData(() => {
-    const now = new Date().toISOString()
-    const rec = { ts: now, type: 'phrase', target_text: 'due item', native_explanation: 'test', review_count: 0, next_review: null }
+    const rec = { type: 'phrase', target_text: 'due item', native_explanation: 'test', review_count: 0, next_review: null }
     writeLearningItem(rec, 'english')
     const due = readItemsDue('english')
     assert.ok(due.length >= 1, 'should have at least 1 due item')
@@ -393,15 +447,14 @@ test('readItemsDue: item with null next_review is returned', () => {
 test('readItemsDue: items with future next_review are not returned', () => {
   withTempData(() => {
     const future = new Date(Date.now() + 7 * 86400000).toISOString()
-    const now = new Date().toISOString()
-    const rec = { ts: now, type: 'phrase', target_text: 'future item', native_explanation: 'test', review_count: 1, next_review: future }
+    const rec = { type: 'phrase', target_text: 'future item', native_explanation: 'test', review_count: 1, next_review: future }
     writeLearningItem(rec, 'english')
     const due = readItemsDue('english')
     assert.ok(!due.some(i => i.target_text === 'future item'), 'future item should NOT be due')
   })
 })
 
-test('readItemsDue: directory missing → empty array, no throw', () => {
+test('readItemsDue: missing space → empty array, no throw', () => {
   withTempData(() => {
     const due = readItemsDue('nonexistent-space')
     assert.ok(Array.isArray(due))
@@ -411,11 +464,11 @@ test('readItemsDue: directory missing → empty array, no throw', () => {
 
 // ── v0.4: writeResponseRecord + readResponsesForSession ─────────────────────
 
-test('writeResponseRecord: creates responses file in correct path', () => {
-  withTempData((dir) => {
+test('writeResponseRecord: record is readable', () => {
+  withTempData(() => {
     writeResponseRecord({ session_id: 'sess-001', text: 'Hello response', word_count: 2 })
-    const file = path.join(dir, 'my-lingo', 'responses', `${TODAY}.jsonl`)
-    assert.ok(fs.existsSync(file), `responses file not found: ${file}`)
+    const records = readResponsesForSession('sess-001', TODAY)
+    assert.ok(records.length >= 1, 'should have at least 1 record')
   })
 })
 
@@ -423,7 +476,6 @@ test('writeResponseRecord: record is readable with correct fields', () => {
   withTempData(() => {
     writeResponseRecord({ session_id: 'sess-001', text: 'Review complete.', word_count: 2 })
     const records = readResponsesForSession('sess-001', TODAY)
-    assert.ok(records.length >= 1, 'should have at least 1 record')
     const r = records[0]
     assert.equal(r.session_id, 'sess-001')
     assert.equal(r.text, 'Review complete.')
@@ -451,7 +503,7 @@ test('readResponsesForSession: multiple responses for same session are all retur
   })
 })
 
-test('readResponsesForSession: nonexistent date → empty array, no throw', () => {
+test('readResponsesForSession: unknown session → empty array, no throw', () => {
   withTempData(() => {
     const results = readResponsesForSession('sess-001', '1990-01-01')
     assert.ok(Array.isArray(results))
@@ -461,13 +513,87 @@ test('readResponsesForSession: nonexistent date → empty array, no throw', () =
 
 test('writeResponseRecord: write failure does not throw', () => {
   withTempData((dir) => {
-    const respDir = path.join(dir, 'my-lingo', 'responses')
-    fs.mkdirSync(respDir, { recursive: true })
-    fs.chmodSync(respDir, 0o444)
-    try {
-      assert.doesNotThrow(() => writeResponseRecord({ session_id: 'sess-001', text: 'test', word_count: 1 }))
-    } finally {
-      fs.chmodSync(respDir, 0o755)
-    }
+    resetDb()
+    fs.writeFileSync(path.join(dir, 'my-lingo'), 'not-a-dir')
+    assert.doesNotThrow(() => writeResponseRecord({ session_id: 'sess-001', text: 'test', word_count: 1 }))
+  })
+})
+
+// ── v0.5: readUnanalyzedTurns + markTurnsAnalyzed (idempotency) ──────────────
+
+test('readUnanalyzedTurns: returns only turns for the session that are not analyzed', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, sessionId: 'sB' }, BASE_CONFIG)
+    const unA = readUnanalyzedTurns('sA')
+    assert.equal(unA.length, 2)
+    assert.ok(unA.every(t => t.session_id === 'sA'))
+  })
+})
+
+test('markTurnsAnalyzed: marked turns no longer returned by readUnanalyzedTurns', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    const before = readUnanalyzedTurns('sA')
+    markTurnsAnalyzed(before.map(t => t.id))
+    assert.equal(readUnanalyzedTurns('sA').length, 0)
+  })
+})
+
+test('markTurnsAnalyzed: only marks the given ids, not the whole session', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    const first = readUnanalyzedTurns('sA')
+    markTurnsAnalyzed(first.map(t => t.id))
+    // a new turn arrives after the analysis pass
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    const remaining = readUnanalyzedTurns('sA')
+    assert.equal(remaining.length, 1, 'the later turn must remain unanalyzed')
+  })
+})
+
+test('readUnanalyzedTurns: null sessionId returns all unanalyzed turns', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    writeTurn({ ...BASE_INPUT, sessionId: 'sB' }, BASE_CONFIG)
+    assert.equal(readUnanalyzedTurns(null).length, 2)
+  })
+})
+
+test('markTurnsAnalyzed: empty list is a no-op', () => {
+  withTempData(() => {
+    writeTurn({ ...BASE_INPUT, sessionId: 'sA' }, BASE_CONFIG)
+    assert.doesNotThrow(() => markTurnsAnalyzed([]))
+    assert.equal(readUnanalyzedTurns('sA').length, 1)
+  })
+})
+
+// ── v0.5: purge ──────────────────────────────────────────────────────────────
+
+test('purgeSpace: removes corrections and items for the space only', () => {
+  withTempData(() => {
+    writeCorrection({ type: 'grammar', original: 'a', corrected: 'b', explanation: 'e', pattern: 'p' }, 'english')
+    writeLearningItem({ type: 'phrase', target_text: 'x', native_explanation: 'y' }, 'english')
+    writeCorrection({ type: 'grammar', original: 'c', corrected: 'd', explanation: 'e', pattern: 'p' }, 'french')
+    purgeSpace('english')
+    assert.equal(readCorrections('english', [CURRENT_MONTH]).length, 0)
+    assert.equal(readLearningItems('english', [CURRENT_MONTH]).length, 0)
+    assert.equal(readCorrections('french', [CURRENT_MONTH]).length, 1, 'other space untouched')
+  })
+})
+
+test('purgeAll: clears all data, keeps sessions when requested', () => {
+  withTempData(() => {
+    writeTurn(BASE_INPUT, BASE_CONFIG)
+    writeCorrection({ type: 'grammar', original: 'a', corrected: 'b', explanation: 'e', pattern: 'p' }, 'english')
+    writeSession({ session_id: 'sK', language_space: 'english', total_prompts: 1, optimized: 1, translated: 0, corrected: 0, fallbacks: 0, raws: 0, top_errors: [] })
+    purgeAll({ keepSessions: true })
+    assert.equal(countTotalTurns(), 0)
+    assert.equal(readCorrections('english', [CURRENT_MONTH]).length, 0)
+    assert.ok(readSession('sK'), 'session should be kept')
+    purgeAll()
+    assert.equal(readSession('sK'), null, 'session should now be gone')
   })
 })

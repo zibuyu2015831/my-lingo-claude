@@ -1,9 +1,15 @@
 const INTERVALS = [1, 3, 7, 14, 30, 60]
 
 export function computeNextReview(reviewCount, nowMs = Date.now()) {
-  const idx = Math.min(reviewCount, INTERVALS.length - 1)
-  const intervalDays = INTERVALS[idx]
+  const intervalDays = computeIntervalDays(reviewCount)
   return new Date(nowMs + intervalDays * 86400000)
+}
+
+// The interval (in days) applied at a given review count. Exposed so the
+// storage layer can persist learning_items.interval_days alongside next_review.
+export function computeIntervalDays(reviewCount) {
+  const idx = Math.min(reviewCount, INTERVALS.length - 1)
+  return INTERVALS[idx]
 }
 
 export function getItemsDue(items, nowMs = Date.now()) {

@@ -147,6 +147,22 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 - 需要跨字段复杂查询（如"过去30天语法错误频率"）
 - 需要全文搜索历史 prompt
 
+### 决议（v0.5）：迁移到 SQLite（`node:sqlite`）
+
+v0.5 起正式迁移到 SQLite。触发因素是 JSONL 在 SRS 与跨会话学习场景下暴露的结构性问题：
+SessionEnd 无法标记"已处理"导致崩溃重跑重复生成 corrections；`updateLearningItemReview`
+需全文件重写；跨日期/跨月查询需在应用层拼接多文件。
+
+**关键约束（实施时实测确认，记录以防回退）：**
+- 使用 Node 内置 `node:sqlite`（需 **Node ≥ 22.5**，`package.json` 的 `engines.node` 已收紧），保持零 npm 依赖。
+- 单文件 `$CLAUDE_PLUGIN_DATA/my-lingo/data.db`，WAL 模式 + `busy_timeout=3000`，匹配多 hook 进程并发。
+- `node:sqlite` **不能绑定布尔 / `undefined` / 对象**，写入层统一转 `0/1` / `null` / `JSON.stringify`；读取层把整数标志位还原为布尔。
+- 时间统一存 ISO-`Z` 字符串，日期范围查询用 `substr(ts,1,10)` / `substr(ts,1,7)` 切片比较，**不依赖** SQLite 的 `datetime('now')`（其输出格式与 ISO-`Z` 字典序不可比）。
+- SessionEnd 幂等：`turns.analyzed` 标志位 + 写入与标记放在**单个事务**内原子提交（网络分析调用置于事务外）。
+- 全部 SQLite 调用封装在 `db.mjs` + `storage.mjs`，应对 `node:sqlite` 未来可能的 breaking change。
+
+实施细节见 [`development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md) 与 [`07-storage.md`](./07-storage.md)。
+
 ---
 
 ## D4：同步路径超时与熔断

@@ -17,12 +17,12 @@
 |------|------|
 | 实现语言 | **Node.js（ESM，`*.mjs`）**，不使用 Python |
 | 外部依赖 | **零 npm 包**，只用 Node.js 标准库 + 系统 `curl` |
-| 存储方案 | **JSONL 文件**（MVP），路径 `$CLAUDE_PLUGIN_DATA/my-lingo/` |
+| 存储方案 | **SQLite**（v0.5 起，`node:sqlite`，单库 `data.db`，WAL），路径 `$CLAUDE_PLUGIN_DATA/my-lingo/`；配置仍为 JSON。**需 Node ≥ 22.5** |
 | API 调用 | **`spawnSync('curl', [...])`**，不能用 `claude` CLI（会死锁）|
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.3 已完成**（182 单元测试 + 11 集成测试通过，SRS / 课程生成 / 画像 / 导出全部实现）|
+| 当前阶段 | **v0.5 已完成**（SQLite 存储迁移；220 单元测试 + 11 集成测试通过）|
 
 ---
 
@@ -60,7 +60,9 @@ my-lingo-claude/
 │   └── lib/
 │       ├── detect.mjs           # 语言检测 + 跳过逻辑
 │       ├── config.mjs           # 4 层配置合并（含语言空间）
-│       ├── storage.mjs          # JSONL 读写工具（含 SRS 扩展）
+│       ├── paths.mjs            # getDataDir()（独立模块，解 storage↔db 循环依赖）
+│       ├── db.mjs               # SQLite 连接单例 getDb()/resetDb()（WAL + initSchema）
+│       ├── storage.mjs          # SQLite 读写工具（含 SRS + 幂等扩展）
 │       ├── api.mjs              # curl 调用 + 熔断器
 │       ├── prompts.mjs          # Prompt 构建
 │       ├── privacy.mjs          # 脱敏处理
@@ -99,7 +101,7 @@ my-lingo-claude/
 | 理解整体数据流、进程模型、时序 | [`04-architecture.md`](./04-architecture.md) |
 | 实现或修改 `hooks/hooks.json` 或 hook 脚本 | [`05-hooks.md`](./05-hooks.md) |
 | 实现或修改外部 API 调用、System Prompt、JSON 输出格式 | [`06-api-protocol.md`](./06-api-protocol.md) |
-| 实现或修改 `storage.mjs`、JSONL 读写、配置文件格式 | [`07-storage.md`](./07-storage.md) |
+| 实现或修改 `storage.mjs`、SQLite 读写、配置文件格式 | [`07-storage.md`](./07-storage.md) |
 | 实现或修改 `plugin.json`、目录结构、`package.json` | [`08-plugin-structure.md`](./08-plugin-structure.md) |
 | 实现或修改 `privacy.mjs`、脱敏规则、安全设计 | [`09-privacy-security.md`](./09-privacy-security.md) |
 | 了解 MVP 范围、实现阶段划分、风险登记、验收清单 | [`10-mvp-roadmap.md`](./10-mvp-roadmap.md) |
@@ -108,6 +110,7 @@ my-lingo-claude/
 | 查看 v0.1 实现计划（MVP 完整阶段）| [`./development/IMPLEMENTATION_PLAN_V0.1.md`](./development/IMPLEMENTATION_PLAN_V0.1.md) |
 | 查看 v0.2 实现计划（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`./development/IMPLEMENTATION_PLAN_V0.2.md`](./development/IMPLEMENTATION_PLAN_V0.2.md) |
 | 查看 v0.3 实现计划（SRS 复习 + 课程生成 + 画像 + 导出）| [`./development/IMPLEMENTATION_PLAN_V0.3.md`](./development/IMPLEMENTATION_PLAN_V0.3.md) |
+| 查看 v0.5 实现计划（SQLite 存储迁移）| [`./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md) |
 
 ---
 
@@ -123,10 +126,10 @@ my-lingo-claude/
   → loadConfig()：读取 config.json + spaces.json（4层合并）
   → execution_mode === 'off' → 退出
   → detectLanguage()：ASCII 比率算法（本地，< 1ms）
-  → execution_mode === 'original' → 只写 turn JSONL，退出
+  → execution_mode === 'original' → 只写 turn 记录（DB），退出
   → redact()：脱敏后发给外部 API
   → callFastModel()：curl 调用，超时 8s
-      ├─ 成功 → 写 turn JSONL，emit { additionalContext, systemMessage }
+      ├─ 成功 → 写 turn 记录（DB），emit { additionalContext, systemMessage }
       └─ 失败 → fallback：写 turn（fallback:true），emit systemMessage 提示
   → hook 进程退出
   → Claude Code 读取输出，注入 additionalContext，Claude 处理 prompt
@@ -149,7 +152,7 @@ Claude 完成一轮回复
   → hook 进程启动（node scripts/stop.mjs）
   → 读取 ~/.claude/projects/<hash>/<session-id>.jsonl 尾部（64KB）
   → 提取最新 assistant text（按 sessionId 过滤）
-  → 有结果 → 写 responses/{today}.jsonl
+  → 有结果 → 写 responses 记录（DB）
   → 无结果（竞态或首轮）→ 静默退出
   → 进程退出（< 200ms，不做 API 调用）
 ```
@@ -159,12 +162,13 @@ Claude 完成一轮回复
 ```
 Claude 会话结束
   → hook 进程启动（node scripts/session-end.mjs）
-  → 读取今日 turns JSONL，过滤本 session_id
-  → 读取今日 responses JSONL，过滤本 session_id（新增）
+  → readUnanalyzedTurns(session_id)：只取本会话未处理的 turns（analyzed=0）
+  → 空 → 直接退出（崩溃重跑 / 双次运行均为幂等空操作）
+  → 读取本 session 的 responses（跨日期）
   → 统计：总数 / 优化数 / 翻译数 / 纠错数 / fallback 数
   → stderr 输出统计摘要（终端可见）
-  → （v0.2+）调用 deep model 分析（含 Claude 回复上下文）
-  → 写 learning JSONL
+  → （v0.2+）调用 deep model 分析（含 Claude 回复上下文，置于事务外）
+  → 单事务：写 corrections/items/sessions + markTurnsAnalyzed(ids) 原子提交
   → 进程退出
 ```
 
@@ -176,7 +180,7 @@ Claude 会话结束
 |------|------|------|
 | D1 Hook 注入 | `additionalContext` 用结构化 CANONICAL REQUEST 指令 | [00-decisions.md#D1](./00-decisions.md) |
 | D2 进程模型 | 无 daemon，用 SessionEnd 替代异步 worker | [00-decisions.md#D2](./00-decisions.md) |
-| D3 存储 | JSONL 文件，不用 SQLite（MVP） | [00-decisions.md#D3](./00-decisions.md) |
+| D3 存储 | v0.1–v0.4 JSONL；**v0.5 起 SQLite（`node:sqlite`，WAL，单库 `data.db`）** | [00-decisions.md#D3](./00-decisions.md) |
 | D4 超时/熔断 | 8s 超时 + 连续 3 次失败触发熔断（circuit.json） | [00-decisions.md#D4](./00-decisions.md) |
 | D5 语言检测 | 本地 ASCII 比率（≥85% 英文，≤30% CJK，中间为 mixed） | [00-decisions.md#D5](./00-decisions.md) |
 | D6 跳过逻辑 | `/` `!` 前缀、< 8 字符、纯代码块、URL 前缀 | [00-decisions.md#D6](./00-decisions.md) |
@@ -190,9 +194,9 @@ Claude 会话结束
 
 ---
 
-## 实现状态（v0.3 完成）
+## 实现状态（v0.5 完成）
 
-当前状态：**v0.4 进行中（Stop hook + 回复捕获），基础：v0.3 全部完成，182 单元测试 + 11 集成测试通过**
+当前状态：**v0.5 已完成（SQLite 存储迁移）；220 单元测试 + 11 集成测试通过**
 
 ### v0.1 实现阶段（MVP）
 
@@ -222,6 +226,22 @@ Claude 会话结束
 | Phase 3 | `profile.md` 学习画像（30 天统计 + 趋势 + 错误模式）| ✅ 已完成 |
 | Phase 4 | `export.md` Markdown 导出（按 space / 月份范围）| ✅ 已完成 |
 
+### v0.4 实现阶段（Stop hook + Claude 回复捕获）
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase 1 | `stop.mjs`（transcript 尾读 + 提取 assistant text）+ `responses` 存储 + SessionEnd 引入回复上下文 | ✅ 已完成 |
+
+### v0.5 实现阶段（SQLite 存储迁移）
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase 0 | `package.json` `engines.node>=22.5.0` | ✅ 已完成 |
+| Phase 1 | `paths.mjs` + `db.mjs`（WAL/单例/initSchema）+ `storage.mjs` 全面 SQL 化 + `srs.computeIntervalDays` + 测试重写 | ✅ 已完成 |
+| Phase 2 | `session-end.mjs` 幂等单事务 + `review.md`（按 id）+ `purge.md`（操作 DB）+ 集成测试 DB 化 | ✅ 已完成 |
+| Phase 2.5 | 只读命令 SQLite 化（`status`/`recent`/`last`/`errors`/`space`/`spaces` 由内联 JSONL 读改为 import `storage.mjs`）+ `countTurnsForSpace`/`countCorrectionsForSpace` + 单元测试 | ✅ 已完成 |
+| Phase 3 | 文档更新（`00-decisions.md` D3 / `07-storage.md` / `INDEX.md`）| ✅ 已完成 |
+
 ### MVP 必须实现的功能（10 项）
 
 1. 插件骨架（`plugin.json`、`hooks/hooks.json`、Node.js hook 脚本）
@@ -244,17 +264,13 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 ├── config.json                  # 全局配置（API URL、模型、超时等）
 ├── spaces.json                  # 语言空间配置（active space、各 space 设置）
 ├── circuit.json                 # 熔断器状态（failure_count、last_failure_at）
-├── turns/
-│   └── YYYY-MM-DD.jsonl         # 每日 turns 记录（每次 hook 追加一行）
-├── learning/
-│   └── english/
-│       ├── corrections-YYYY-MM.jsonl   # 语法纠错记录
-│       └── items-YYYY-MM.jsonl         # 学习材料
-├── responses/
-│   └── YYYY-MM-DD.jsonl         # Claude 回复缓存（Stop hook 写入）
-└── sessions/
-    └── YYYY-MM-DD.jsonl         # 会话摘要（SessionEnd 写入）
+└── data.db                      # SQLite 单库（WAL）：turns / responses /
+                                 #   corrections / learning_items / sessions 五张表
+                                 #   （运行时伴随 data.db-wal / data.db-shm）
 ```
+
+> v0.5 起所有记录统一存入 `data.db`；配置仍为 JSON 文件。读写经 `scripts/lib/storage.mjs` →
+> `scripts/lib/db.mjs`（`getDb()` 单例 + WAL）。
 
 **注意**：`api_key` 不存储在任何文件中，从环境变量 `MY_LINGO_API_KEY` 或 `plugin.json` userConfig 读取。
 

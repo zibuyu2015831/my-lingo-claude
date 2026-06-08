@@ -8,6 +8,6 @@
     "test:integration": "node --test tests/integration/integration.test.mjs"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.5.0"
   }
 }

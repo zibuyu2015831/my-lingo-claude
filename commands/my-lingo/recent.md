@@ -19,37 +19,12 @@ Parse `$ARGUMENTS` — take the first integer, clamp to 1–50, default to 5 if 
 # Replace N_VALUE with the parsed integer (default 5)
 N_VALUE=5
 
-node -e "
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data');
-const dataDir = path.join(base, 'my-lingo');
+node --input-type=module --eval "
+import { readRecentTurns } from './scripts/lib/storage.mjs';
 const n = parseInt(process.argv[1]) || 5;
 
-// Read turn dates in descending order
-let dates = [];
-try {
-  const turnsDir = path.join(dataDir, 'turns');
-  if (fs.existsSync(turnsDir)) {
-    dates = fs.readdirSync(turnsDir).filter(f => f.endsWith('.jsonl')).map(f => f.replace('.jsonl', '')).sort().reverse();
-  }
-} catch {}
-
-// Collect most recent n turns
-const turns = [];
-for (const date of dates) {
-  try {
-    const file = path.join(dataDir, 'turns', date + '.jsonl');
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    const dayTurns = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
-    for (const t of dayTurns) {
-      turns.push(t);
-      if (turns.length >= n) break;
-    }
-  } catch {}
-  if (turns.length >= n) break;
-}
+// Most recent n turns, newest first (storage returns DESC by id).
+const turns = readRecentTurns(n);
 
 if (turns.length === 0) {
   console.log('[my-lingo] No turns recorded yet.');

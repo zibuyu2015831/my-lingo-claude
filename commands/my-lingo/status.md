@@ -14,7 +14,8 @@ Display the current My Lingo configuration and today's optimization statistics.
 node --input-type=module --eval "
 import fs from 'node:fs';
 import path from 'node:path';
-import { readTurnsForDay, countTotalTurns, getDataDir } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { readTurnsForDay, countTotalTurns, getDataDir } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 const dataDir = getDataDir();
 

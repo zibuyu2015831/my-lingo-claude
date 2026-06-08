@@ -13,8 +13,9 @@ Display recorded sentence patterns from your interactions.
 
 ```bash
 node --input-type=module << 'EOF'
-import { loadConfig, loadSpaces, getActiveSpace } from './scripts/lib/config.mjs'
-import { listItemMonths, readLearningItems } from './scripts/lib/storage.mjs'
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+const { loadConfig, loadSpaces, getActiveSpace } = await import(ROOT + '/scripts/lib/config.mjs')
+const { listItemMonths, readLearningItems } = await import(ROOT + '/scripts/lib/storage.mjs')
 
 const args = process.argv.slice(2)
 const daysIdx = args.indexOf('--days')

@@ -12,11 +12,12 @@ Display a comprehensive language learning profile with statistics and improvemen
 
 ```bash
 node --input-type=module << 'EOF'
-import { loadConfig, loadSpaces, getActiveSpace } from './scripts/lib/config.mjs'
-import {
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+const { loadConfig, loadSpaces, getActiveSpace } = await import(ROOT + '/scripts/lib/config.mjs')
+const {
   listCorrectionMonths, readCorrections, readTurnsLastNDays,
   listItemMonths, readLearningItems, readItemsDue,
-} from './scripts/lib/storage.mjs'
+} = await import(ROOT + '/scripts/lib/storage.mjs')
 
 const config = loadConfig(process.cwd())
 const spaces = loadSpaces()

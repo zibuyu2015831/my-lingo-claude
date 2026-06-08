@@ -20,7 +20,8 @@ Parse `$ARGUMENTS` — take the first integer, clamp to 1–50, default to 5 if 
 N_VALUE=5
 
 node --input-type=module --eval "
-import { readRecentTurns } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { readRecentTurns } = await import(ROOT + '/scripts/lib/storage.mjs');
 const n = parseInt(process.argv[1]) || 5;
 
 // Most recent n turns, newest first (storage returns DESC by id).

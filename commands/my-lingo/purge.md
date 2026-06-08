@@ -24,7 +24,8 @@ ALL_FLAG=""      # set to "--all" if --all was in $ARGUMENTS
 KEEP_CONFIG=""   # set to "--keep-config" if --keep-config was in $ARGUMENTS
 
 node --input-type=module --eval "
-import { loadSpaces } from './scripts/lib/config.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs');
 const allFlag = process.argv[1] === '--all';
 const keepConfig = process.argv[2] === '--keep-config';
 
@@ -62,9 +63,10 @@ KEEP_CONFIG=""
 node --input-type=module --eval "
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadSpaces } from './scripts/lib/config.mjs';
-import { getDataDir } from './scripts/lib/paths.mjs';
-import { purgeSpace, purgeAll } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs');
+const { getDataDir } = await import(ROOT + '/scripts/lib/paths.mjs');
+const { purgeSpace, purgeAll } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 const allFlag = process.argv[1] === '--all';
 const keepConfig = process.argv[2] === '--keep-config';

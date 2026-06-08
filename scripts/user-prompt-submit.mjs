@@ -121,6 +121,7 @@ function main() {
 
   // Prompt length guard
   if (!isRefine && [...text].length > (config.max_prompt_length || 4000)) {
+    debugLog('TOO_LONG', { length: [...text].length, max: config.max_prompt_length || 4000 }, config)
     try {
       writeTurn({
         prompt: text,
@@ -137,6 +138,7 @@ function main() {
 
   // original mode: record and pass through without API call
   if (!isRefine && config.execution_mode === 'original') {
+    debugLog('ORIGINAL_MODE', { preview: text.slice(0, 80) }, config)
     try {
       writeTurn({
         prompt: text,
@@ -163,6 +165,7 @@ function main() {
       return
     }
     recordApiSuccess(config)
+    debugLog('REFINE_RESULT', { preview: (result.execution_prompt_en || '').slice(0, 200) }, config)
     try {
       writeTurn({
         prompt: text,
@@ -180,9 +183,11 @@ function main() {
 
   // ⑥ Main optimization path
   const detection = detectLanguage(text)
+  debugLog('DETECT', { lang: detection.lang, score: detection.score, method: detection.method }, config)
 
   // Circuit breaker check
   if (checkCircuitBreaker()) {
+    debugLog('CIRCUIT_OPEN', { fallback_policy: config.fallback_policy }, config)
     try {
       writeTurn({
         prompt: text,
@@ -247,6 +252,12 @@ function main() {
 
   const additionalContext = buildAdditionalContext(result, detection, config)
   const systemMessage = buildSystemMessage(result, detection, latencyMs)
+  debugLog('EMIT', {
+    has_additional_context: Boolean(additionalContext),
+    system_message: systemMessage,
+    latency_ms: latencyMs,
+    rewrite_type: result.rewrite_type,
+  }, config)
   emit({ additionalContext, systemMessage })
 }
 

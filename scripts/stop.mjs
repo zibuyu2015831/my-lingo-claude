@@ -6,6 +6,7 @@ import path from 'node:path'
 import os from 'node:os'
 import process from 'node:process'
 import { writeResponseRecord } from './lib/storage.mjs'
+import { debugLog } from './lib/debug.mjs'
 
 // Derive Claude Code transcript path from cwd + sessionId.
 // Formula confirmed experimentally: replace all / and _ with -
@@ -55,19 +56,35 @@ function main() {
     const sessionId = process.env.CLAUDE_SESSION_ID
     if (!sessionId) return
 
+    debugLog('STOP_START', { session_id: sessionId, cwd: process.cwd() })
+
     const tPath = transcriptPath(process.cwd(), sessionId)
-    if (!fs.existsSync(tPath)) return
+    if (!fs.existsSync(tPath)) {
+      debugLog('STOP_TRANSCRIPT_MISS', { path: tPath })
+      return
+    }
+
+    const fileSize = fs.statSync(tPath).size
+    debugLog('STOP_TRANSCRIPT_HIT', { path: tPath, file_size: fileSize })
 
     // 64KB covers ~50 records — sufficient for any realistic turn
     const chunk = readTailBytes(tPath, 65536)
     const text = extractLastResponse(chunk, sessionId)
-    if (!text) return
+    if (!text) {
+      const lines = chunk.split('\n').filter(Boolean).length
+      debugLog('STOP_RESPONSE_MISS', { chunk_lines: lines, session_id: sessionId })
+      return
+    }
+
+    const wordCount = text.split(/\s+/).filter(Boolean).length
+    debugLog('STOP_RESPONSE_FOUND', { word_count: wordCount, preview: text.slice(0, 120) })
 
     writeResponseRecord({
       session_id: sessionId,
       text,
-      word_count: text.split(/\s+/).filter(Boolean).length,
+      word_count: wordCount,
     })
+    debugLog('STOP_DB_WRITE', { session_id: sessionId, word_count: wordCount })
   } catch {
     // Never throw — Stop hook must always exit 0
   }

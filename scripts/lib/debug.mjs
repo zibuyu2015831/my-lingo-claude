@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { getDataDir } from './storage.mjs'
+import { getDataDir } from './paths.mjs'
 import { redact } from './privacy.mjs'
 
 const MAX_LOG_BYTES = 1024 * 1024  // 1 MB

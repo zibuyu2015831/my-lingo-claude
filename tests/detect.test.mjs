@@ -62,10 +62,6 @@ test('shouldSkip: code block → true', () => {
   assert.equal(shouldSkip('```js\nfoo()'), true)
 })
 
-test('shouldSkip: ! prefix → true (shell command)', () => {
-  assert.equal(shouldSkip('!ls -la'), true)
-})
-
 test('shouldSkip: -- prefix → false (handled by hook, not skipped here)', () => {
   assert.equal(shouldSkip('-- implement this in Python'), false)
 })

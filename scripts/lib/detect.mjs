@@ -23,10 +23,7 @@ export function shouldSkip(prompt) {
   // 1. slash commands
   if (prompt.startsWith('/')) return true
 
-  // 2. shell commands (! prefix)
-  if (prompt.startsWith('!')) return true
-
-  // 3. too short
+  // 2. too short
   const charCount = [...prompt].length
   const wordCount = prompt.split(/\s+/).filter(Boolean).length
   if (charCount < 8 && wordCount < 3) return true

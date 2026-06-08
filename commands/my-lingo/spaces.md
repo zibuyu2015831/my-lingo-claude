@@ -11,50 +11,24 @@ List all configured language spaces with their turns and corrections statistics.
 ### Step 1: Read all spaces and stats
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data');
-const dataDir = path.join(base, 'my-lingo');
+node --input-type=module --eval "
+import { loadSpaces } from './scripts/lib/config.mjs';
+import { countTurnsForSpace, countCorrectionsForSpace } from './scripts/lib/storage.mjs';
 
 // Load spaces
 let spaces = { active: 'english', spaces: { english: { key: 'english', display_name: 'English', target_language: 'en', native_language: 'zh-CN', level: 'intermediate' } } };
-try { const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8')); if (raw.active && raw.spaces) spaces = raw; } catch {}
-
-// Count turns per space
-const turnCounts = {};
-try {
-  const turnsDir = path.join(dataDir, 'turns');
-  if (fs.existsSync(turnsDir)) {
-    fs.readdirSync(turnsDir).filter(f => f.endsWith('.jsonl')).forEach(f => {
-      try {
-        const lines = fs.readFileSync(path.join(turnsDir, f), 'utf8').split('\n').filter(Boolean);
-        lines.forEach(l => { try { const r = JSON.parse(l); const sp = r.language_space || 'english'; turnCounts[sp] = (turnCounts[sp] || 0) + 1; } catch {} });
-      } catch {}
-    });
-  }
-} catch {}
-
-// Count corrections per space
-const corrCounts = {};
-try {
-  const learnDir = path.join(dataDir, 'learning');
-  if (fs.existsSync(learnDir)) {
-    fs.readdirSync(learnDir).forEach(sp => {
-      const spDir = path.join(learnDir, sp);
-      if (!fs.statSync(spDir).isDirectory()) return;
-      let count = 0;
-      fs.readdirSync(spDir).filter(f => f.startsWith('corrections-') && f.endsWith('.jsonl')).forEach(f => {
-        try { count += fs.readFileSync(path.join(spDir, f), 'utf8').split('\n').filter(Boolean).length; } catch {}
-      });
-      corrCounts[sp] = count;
-    });
-  }
-} catch {}
+try { const raw = loadSpaces(); if (raw.active && raw.spaces) spaces = raw; } catch {}
 
 const active = spaces.active;
 const spaceKeys = Object.keys(spaces.spaces);
+
+// Count turns and corrections per configured space
+const turnCounts = {};
+const corrCounts = {};
+for (const key of spaceKeys) {
+  turnCounts[key] = countTurnsForSpace(key);
+  corrCounts[key] = countCorrectionsForSpace(key);
+}
 console.log('[my-lingo] Language Spaces (' + spaceKeys.length + ' configured)');
 console.log('');
 spaceKeys.forEach(key => {

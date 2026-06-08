@@ -26,6 +26,8 @@ import {
   markTurnsAnalyzed,
   purgeSpace,
   purgeAll,
+  countTurnsForSpace,
+  countCorrectionsForSpace,
 } from '../scripts/lib/storage.mjs'
 import { resetDb } from '../scripts/lib/db.mjs'
 
@@ -202,6 +204,30 @@ test('countTotalTurns: counts across multiple days', () => {
     writeTurn({ ...BASE_INPUT, ts: '2026-01-01T10:00:00.000Z' }, BASE_CONFIG)
     const total = countTotalTurns()
     assert.equal(total, 3)
+  })
+})
+
+// ── countTurnsForSpace / countCorrectionsForSpace (slash-command stats) ───────
+
+test('countTurnsForSpace: counts only the given space', () => {
+  withTempData(() => {
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'english' })
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'english' })
+    writeTurn(BASE_INPUT, { ...BASE_CONFIG, language_space: 'spanish' })
+    assert.equal(countTurnsForSpace('english'), 2)
+    assert.equal(countTurnsForSpace('spanish'), 1)
+    assert.equal(countTurnsForSpace('french'), 0)
+  })
+})
+
+test('countCorrectionsForSpace: counts only the given space', () => {
+  withTempData(() => {
+    writeCorrection({ type: 'grammar', original: 'I has', corrected: 'I have' }, 'english')
+    writeCorrection({ type: 'grammar', original: 'he go', corrected: 'he goes' }, 'english')
+    writeCorrection({ type: 'gender', original: 'el casa', corrected: 'la casa' }, 'spanish')
+    assert.equal(countCorrectionsForSpace('english'), 2)
+    assert.equal(countCorrectionsForSpace('spanish'), 1)
+    assert.equal(countCorrectionsForSpace('french'), 0)
   })
 })
 

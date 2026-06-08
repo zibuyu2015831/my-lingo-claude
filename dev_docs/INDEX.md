@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.5 已完成**（SQLite 存储迁移；218 单元测试 + 11 集成测试通过）|
+| 当前阶段 | **v0.5 已完成**（SQLite 存储迁移；220 单元测试 + 11 集成测试通过）|
 
 ---
 
@@ -196,7 +196,7 @@ Claude 会话结束
 
 ## 实现状态（v0.5 完成）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）；218 单元测试 + 11 集成测试通过**
+当前状态：**v0.5 已完成（SQLite 存储迁移）；220 单元测试 + 11 集成测试通过**
 
 ### v0.1 实现阶段（MVP）
 
@@ -239,6 +239,7 @@ Claude 会话结束
 | Phase 0 | `package.json` `engines.node>=22.5.0` | ✅ 已完成 |
 | Phase 1 | `paths.mjs` + `db.mjs`（WAL/单例/initSchema）+ `storage.mjs` 全面 SQL 化 + `srs.computeIntervalDays` + 测试重写 | ✅ 已完成 |
 | Phase 2 | `session-end.mjs` 幂等单事务 + `review.md`（按 id）+ `purge.md`（操作 DB）+ 集成测试 DB 化 | ✅ 已完成 |
+| Phase 2.5 | 只读命令 SQLite 化（`status`/`recent`/`last`/`errors`/`space`/`spaces` 由内联 JSONL 读改为 import `storage.mjs`）+ `countTurnsForSpace`/`countCorrectionsForSpace` + 单元测试 | ✅ 已完成 |
 | Phase 3 | 文档更新（`00-decisions.md` D3 / `07-storage.md` / `INDEX.md`）| ✅ 已完成 |
 
 ### MVP 必须实现的功能（10 项）

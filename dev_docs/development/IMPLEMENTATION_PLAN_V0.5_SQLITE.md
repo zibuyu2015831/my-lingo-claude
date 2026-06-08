@@ -448,9 +448,26 @@ try {
 
 见 §5.5：Step 1 输出 `id`，Step 2 按 `id` 调用新签名。无其它逻辑变化。
 
-### 6.D 其它命令（无需改动）
+### 6.D 只读命令重写（草案误判，已修正）⚠️
 
-`profile.md`、`export.md`、`vocab.md`、`sentences.md`、`errors.md`、`recent.md`、`status.md`、`last.md` 仅消费 §5.1 中签名不变的读函数（`readCorrections`/`readLearningItems`/`listItemMonths`/`listCorrectionMonths`/`readTurnsLastNDays`/`readRecentTurns`/`readItemsDue` 等），**无需改动**——只要这些函数的返回结构与字段名维持原样（含 `normalizeTurn` 归一化）。这是"签名兼容"策略的最大收益面，必须在验收时逐命令冒烟确认。
+> ⚠️ **本节原断言「`errors.md`/`recent.md`/`status.md`/`last.md` 仅消费签名不变的读函数，无需改动」是错误的**。经逐命令代码核对：这些命令**根本不调用 `storage.mjs`**，而是用内联 `node -e` + `require('fs')` **直接读 JSONL 文件**（`turns/<date>.jsonl`、`learning/<space>/corrections-*.jsonl`）。迁移后这些目录不再被写入，命令会静默显示「全空」（0 turns / No corrections），却不报错——比崩溃更隐蔽。`space.md`/`spaces.md` 同样直接读 JSONL，且原节漏列。单元/集成测试均未覆盖这些内联命令，故 218 全绿仍掩盖了此缺口。
+
+**实际需重写的只读命令（6 个）**，全部从 CommonJS `node -e`+`fs` 改为 ESM `node --input-type=module --eval` + import `storage.mjs`：
+
+| 命令 | 改用的存储函数 |
+|------|----------------|
+| `status.md` | `readTurnsForDay(today)` + `countTotalTurns()`（config/spaces 仍读 JSON，API 凭据仍取环境变量） |
+| `recent.md` | `readRecentTurns(n)`（已按 id DESC，天然最新优先，删除原「遍历日期文件」逻辑） |
+| `last.md` | `readRecentTurns(20)` 后 `.find(非 raw/original)`（跨天正确，替代「今天否则昨天」文件读） |
+| `errors.md` | `readCorrections(space, monthList)`（30 天月份窗口；`loadSpaces()` 取活动空间） |
+| `space.md` | `countTurnsForSpace(space)` + `countCorrectionsForSpace(space)` + `loadSpaces()` |
+| `spaces.md` | 对每个配置空间 key 调 `countTurnsForSpace`/`countCorrectionsForSpace` + `loadSpaces()` |
+
+**连带新增**（`storage.mjs`）：`countTurnsForSpace(space)`、`countCorrectionsForSpace(space)`（`SELECT COUNT(*) ... WHERE language_space=?`），供 `space.md`/`spaces.md` 的按空间统计使用；两者各配单元测试。
+
+**确实无需改动的命令**：`export.md`（已 import `storage.mjs` 的 `readCorrections`/`readLearningItems` 等，lesson 仍为 `.md` 文件）、`profile.md`/`vocab.md`/`sentences.md`（消费签名不变的读函数）、`mode.md`/`use.md`/`setup.md`（仅读写 `config.json`/`spaces.json`，仍为 JSON）。
+
+**验收**：6 个重写命令须逐个对「已 seed 的临时 DB」冒烟运行确认输出非空且字段正确（已完成：status/recent/last/errors/space/spaces 全部正确渲染，`last` 正确跳过 raw turn、布尔经 `normalizeTurn` 正常显示）。
 
 ---
 

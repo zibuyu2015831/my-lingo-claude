@@ -11,13 +11,12 @@ Display the current My Lingo configuration and today's optimization statistics.
 ### Step 1: Load configuration and display status
 
 ```bash
-node -e "
-const fs   = require('fs');
-const path = require('path');
+node --input-type=module --eval "
+import fs from 'node:fs';
+import path from 'node:path';
+import { readTurnsForDay, countTotalTurns, getDataDir } from './scripts/lib/storage.mjs';
 
-const dataDir = process.env.CLAUDE_PLUGIN_DATA
-  ? path.join(process.env.CLAUDE_PLUGIN_DATA, 'my-lingo')
-  : path.join(require('os').homedir(), '.claude', 'plugins', 'data', 'my-lingo');
+const dataDir = getDataDir();
 
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')); } catch {}
@@ -35,30 +34,14 @@ function fmt(val) {
 }
 
 const today = new Date().toISOString().slice(0, 10);
-const turnsFile = path.join(dataDir, 'turns', today + '.jsonl');
-let turns = [];
-try {
-  turns = fs.readFileSync(turnsFile, 'utf8').split('\n').filter(Boolean)
-    .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-} catch {}
+const turns = readTurnsForDay(today);
 
 const optimized = turns.filter(r => r.execution_prompt && !r.fallback);
 const translated = turns.filter(r => r.detected_language !== 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
 const corrected  = turns.filter(r => r.detected_language === 'en' && !r.fallback && r.mode !== 'raw' && r.mode !== 'original');
 const fallbacks  = turns.filter(r => r.fallback);
 
-let total = 0;
-try {
-  const turnsDir = path.join(dataDir, 'turns');
-  if (fs.existsSync(turnsDir)) {
-    total = fs.readdirSync(turnsDir).filter(f => f.endsWith('.jsonl'))
-      .reduce((s, f) => {
-        try {
-          return s + fs.readFileSync(path.join(turnsDir, f), 'utf8').split('\n').filter(Boolean).length;
-        } catch { return s; }
-      }, 0);
-  }
-} catch {}
+const total = countTotalTurns();
 
 const apiKeyDisplay = apiKey ? '****' + apiKey.slice(-4) + '  (env)' : '(not set) — run /my-lingo:setup';
 

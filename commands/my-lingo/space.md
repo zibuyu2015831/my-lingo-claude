@@ -11,47 +11,20 @@ Show the current language space configuration, including turns and corrections s
 ### Step 1: Read current active space
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data');
-const dataDir = path.join(base, 'my-lingo');
+node --input-type=module --eval "
+import { loadSpaces } from './scripts/lib/config.mjs';
+import { countTurnsForSpace, countCorrectionsForSpace } from './scripts/lib/storage.mjs';
 
 // Load spaces
 let spaces = { active: 'english', spaces: { english: { key: 'english', display_name: 'English', target_language: 'en', native_language: 'zh-CN', level: 'intermediate', display_mode: 'compact', auto_generate_learning: true } } };
-try { const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8')); if (raw.active && raw.spaces) spaces = raw; } catch {}
+try { const raw = loadSpaces(); if (raw.active && raw.spaces) spaces = raw; } catch {}
 
 const active = spaces.active || 'english';
 const space = spaces.spaces[active] || {};
 
-// Count turns for this space
-let turnCount = 0;
-try {
-  const turnsDir = path.join(dataDir, 'turns');
-  if (fs.existsSync(turnsDir)) {
-    fs.readdirSync(turnsDir).filter(f => f.endsWith('.jsonl')).forEach(f => {
-      try {
-        const lines = fs.readFileSync(path.join(turnsDir, f), 'utf8').split('\n').filter(Boolean);
-        lines.forEach(l => { try { const r = JSON.parse(l); if (r.language_space === active) turnCount++; } catch {} });
-      } catch {}
-    });
-  }
-} catch {}
-
-// Count corrections for this space (current month)
-let corrCount = 0;
-try {
-  const learnDir = path.join(dataDir, 'learning', active);
-  if (fs.existsSync(learnDir)) {
-    fs.readdirSync(learnDir).filter(f => f.startsWith('corrections-') && f.endsWith('.jsonl')).forEach(f => {
-      try {
-        const lines = fs.readFileSync(path.join(learnDir, f), 'utf8').split('\n').filter(Boolean);
-        corrCount += lines.length;
-      } catch {}
-    });
-  }
-} catch {}
+// Count turns and corrections for this space
+const turnCount = countTurnsForSpace(active);
+const corrCount = countCorrectionsForSpace(active);
 
 console.log('[my-lingo] Current Language Space');
 console.log('');

@@ -11,38 +11,20 @@ Show the most recent non-skipped prompt optimization from today (or yesterday if
 ### Step 1: Read recent turns
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
+node --input-type=module --eval "
+import { readRecentTurns } from './scripts/lib/storage.mjs';
 
-const dataDir = process.env.CLAUDE_PLUGIN_DATA
-  ? path.join(process.env.CLAUDE_PLUGIN_DATA, 'my-lingo')
-  : path.join(require('os').homedir(), '.claude', 'plugins', 'data', 'my-lingo');
-
-function readDay(date) {
-  try {
-    const file = path.join(dataDir, 'turns', date + '.jsonl');
-    if (!fs.existsSync(file)) return [];
-    return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-      .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  } catch { return []; }
-}
-
-const today = new Date().toISOString().slice(0, 10);
-let turns = readDay(today);
-
-if (!turns.length) {
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  turns = readDay(yesterday);
-}
+// Newest turns first (DESC by id); a window of 20 comfortably spans the most
+// recent activity regardless of day boundary.
+const turns = readRecentTurns(20);
 
 if (!turns.length) {
   console.log('[my-lingo] No turns recorded yet. Start using Claude Code to build history.');
   process.exit(0);
 }
 
-// get last non-raw, non-original record
-const record = turns.slice().reverse().find(r => r.mode !== 'raw' && r.mode !== 'original') || turns[turns.length - 1];
+// get most recent non-raw, non-original record (turns already newest-first)
+const record = turns.find(r => r.mode !== 'raw' && r.mode !== 'original') || turns[0];
 
 console.log('');
 console.log('── My Lingo: Last Optimization ──────────────────────');

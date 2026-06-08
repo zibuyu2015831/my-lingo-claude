@@ -93,6 +93,23 @@ export function countTotalTurns() {
   }
 }
 
+// Per-space counts (used by /my-lingo:space and /my-lingo:spaces stats).
+export function countTurnsForSpace(space) {
+  try {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM turns WHERE language_space=?').get(space).n
+  } catch {
+    return 0
+  }
+}
+
+export function countCorrectionsForSpace(space) {
+  try {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM corrections WHERE language_space=?').get(space).n
+  } catch {
+    return 0
+  }
+}
+
 export function readRecentTurns(count) {
   if (count <= 0) return []
   try {

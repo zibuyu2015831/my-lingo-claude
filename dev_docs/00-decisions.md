@@ -560,6 +560,75 @@ my-lingo-claude/
 
 ---
 
+## D14：通过 Stop Hook + Transcript 文件捕获 Claude 回复
+
+### 问题
+
+SessionEnd 分析目前只有 `original_prompt → execution_prompt` 的对比，缺少 Claude 的实际回复内容。Claude 的高质量英文回复本身是宝贵的学习材料（目标语言的专业示范），忽略它导致学习系统只分析"学习者的输出"，而错过了"母语者的示范"。
+
+### 技术发现
+
+Claude Code 将完整对话（含 Claude 的每条回复）实时写入本地 JSONL 文件：
+
+```
+~/.claude/projects/<path-hash>/<session-id>.jsonl
+```
+
+**path-hash 推导算法（已通过实验验证）：**
+```js
+// /data/zibuyu/my_lingo_claude → -data-zibuyu-my-lingo-claude
+const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+```
+将 cwd 中所有 `/` 和 `_` 替换为 `-`（前导 `/` 变为前导 `-`）。
+
+**JSONL 行格式（assistant 回复）：**
+```json
+{
+  "type": "assistant",
+  "sessionId": "abc123",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "thinking", ... },
+      { "type": "text", "text": "实际回复文本..." },
+      { "type": "tool_use", ... }
+    ]
+  }
+}
+```
+学习内容提取只需关注 `type === "text"` 的 content block。
+
+### 推荐方案
+
+**Stop hook（每轮结束触发）+ Transcript 文件尾读**：
+
+1. Stop hook 触发后，读取 transcript JSONL 尾部（最多 64KB）
+2. 按 sessionId 过滤，提取最新的 assistant text 内容
+3. 写入 `$PLUGIN_DATA/my-lingo/responses/{today}.jsonl`
+4. SessionEnd 读取 responses 数据，纳入学习分析（降级安全：无数据则跳过）
+
+### 安全约束（不影响用户交互）
+
+Stop hook 可能阻塞用户输入下一条命令，因此约束严格：
+
+| 约束 | 原因 |
+|------|------|
+| 无 API 调用 | 会增加 2–8s 可感知延迟 |
+| 无 sleep/重试 | 延迟直接影响交互响应 |
+| 目标 < 200ms | 仅涉及本地文件读写 |
+| 所有错误静默 | 学习数据缺失不影响核心功能 |
+| 始终 exit 0 | 非 0 退出会在 Claude Code 界面显示错误 |
+
+### 竞态风险处理
+
+Claude Code 写 transcript 与触发 Stop hook 之间理论上存在竞态，但无官方文档保证顺序。实现时**不依赖时序**：找不到 assistant 记录直接静默退出，不重试不 sleep。SessionEnd 在 response 数据缺失时降级为现有行为（仅分析 original→optimized 对比），不中断。
+
+### 为何不用 PostToolUse Hook
+
+PostToolUse 在每次工具调用后触发，包含工具输出，但不包含 Claude 的文本回复（工具调用之间的 prose）。Stop hook 是唯一能在完整回复生成后运行的钩子，配合 transcript 文件读取是当前最简洁的方案。
+
+---
+
 ## 总结：核心决策一览
 
 | 决策点 | 原设计 | 推荐方案 |
@@ -575,3 +644,4 @@ my-lingo-claude/
 | 学习系统 | 立即实现（含 jobs 表）| SessionEnd 摘要（MVP），SRS（v0.3）|
 | MVP 范围 | 17 项（含多语言空间）| 10 项（单语言空间优先）|
 | 项目命名 | 未定义 | My Lingo / my-lingo / my-lingo-claude（三层分离）|
+| Claude 回复捕获 | 无 | Stop hook + transcript 文件读取，responses/ 缓存 |

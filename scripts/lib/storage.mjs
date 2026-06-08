@@ -234,6 +234,35 @@ export function readItemsDue(space) {
   }
 }
 
+export function writeResponseRecord(record) {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const dir = path.join(getDataDir(), 'responses')
+    ensureDir(dir)
+    const file = path.join(dir, `${today}.jsonl`)
+    const line = JSON.stringify({ ...record, ts: record.ts || new Date().toISOString() })
+    fs.appendFileSync(file, line + '\n', { encoding: 'utf8', mode: 0o600 })
+  } catch {}
+}
+
+export function readResponsesForSession(sessionId, date) {
+  try {
+    const file = path.join(getDataDir(), 'responses', `${date}.jsonl`)
+    if (!fs.existsSync(file)) return []
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+    const results = []
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line)
+        if (!sessionId || r.session_id === sessionId) results.push(r)
+      } catch {}
+    }
+    return results
+  } catch {
+    return []
+  }
+}
+
 export function readRecentTurns(n) {
   if (n <= 0) return []
   try {

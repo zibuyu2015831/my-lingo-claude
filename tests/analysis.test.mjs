@@ -113,3 +113,44 @@ test('parseAnalysisResponse: null input → null, no throw', () => {
   const result = parseAnalysisResponse(null)
   assert.equal(result, null)
 })
+
+// ── buildAnalysisMessages with responses ─────────────────────────────────────
+
+test('buildAnalysisMessages: with responses → user message includes response text', () => {
+  const responses = [
+    { text: "I'll review this code. Here are the issues I found.", word_count: 10 },
+  ]
+  const result = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG, responses)
+  assert.ok(result !== null)
+  assert.ok(result.messages[1].content.includes("I'll review this code"),
+    'user message should include response text')
+})
+
+test('buildAnalysisMessages: with responses → system prompt mentions response usage', () => {
+  const responses = [{ text: 'Some response text', word_count: 3 }]
+  const result = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG, responses)
+  assert.ok(result.messages[0].content.includes("Claude's responses"),
+    'system prompt should mention Claude responses')
+})
+
+test('buildAnalysisMessages: with empty responses array → same as no responses', () => {
+  const withEmpty = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG, [])
+  const withNone = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG)
+  assert.equal(withEmpty.messages[0].content, withNone.messages[0].content)
+  assert.equal(withEmpty.messages[1].content, withNone.messages[1].content)
+})
+
+test('buildAnalysisMessages: with null responses → same as no responses', () => {
+  const withNull = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG, null)
+  const withNone = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG)
+  assert.equal(withNull.messages[1].content, withNone.messages[1].content)
+})
+
+test('buildAnalysisMessages: long response text is truncated to 300 chars', () => {
+  const longText = 'x'.repeat(500)
+  const responses = [{ text: longText, word_count: 500 }]
+  const result = buildAnalysisMessages(SAMPLE_TURNS, BASE_CONFIG, responses)
+  const userMsg = result.messages[1].content
+  assert.ok(!userMsg.includes(longText), 'full 500-char text should not appear')
+  assert.ok(userMsg.includes('...'), 'truncated text should end with ...')
+})

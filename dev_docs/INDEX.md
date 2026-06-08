@@ -20,7 +20,7 @@
 | 存储方案 | **JSONL 文件**（MVP），路径 `$CLAUDE_PLUGIN_DATA/my-lingo/` |
 | API 调用 | **`spawnSync('curl', [...])`**，不能用 `claude` CLI（会死锁）|
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
-| Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **SessionEnd**（批量分析）|
+| Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
 | 当前阶段 | **v0.3 已完成**（182 单元测试 + 11 集成测试通过，SRS / 课程生成 / 画像 / 导出全部实现）|
 
@@ -54,6 +54,7 @@ my-lingo-claude/
 │   └── hooks.json               # UserPromptSubmit + SessionEnd 配置
 ├── scripts/
 │   ├── user-prompt-submit.mjs   # Hook 主入口
+│   ├── stop.mjs                 # Stop hook：每轮结束后捕获 Claude 回复
 │   ├── session-end.mjs          # 会话结束钩子
 │   ├── generate-lesson.mjs      # 课程生成脚本（被 lesson.md 调用）
 │   └── lib/
@@ -141,16 +142,29 @@ actual request and ignore the language of their original message:
 {execution_prompt_en}
 ```
 
+### Stop Hook 路径（每轮结束，捕获 Claude 回复）
+
+```
+Claude 完成一轮回复
+  → hook 进程启动（node scripts/stop.mjs）
+  → 读取 ~/.claude/projects/<hash>/<session-id>.jsonl 尾部（64KB）
+  → 提取最新 assistant text（按 sessionId 过滤）
+  → 有结果 → 写 responses/{today}.jsonl
+  → 无结果（竞态或首轮）→ 静默退出
+  → 进程退出（< 200ms，不做 API 调用）
+```
+
 ### SessionEnd Hook 路径
 
 ```
 Claude 会话结束
   → hook 进程启动（node scripts/session-end.mjs）
   → 读取今日 turns JSONL，过滤本 session_id
+  → 读取今日 responses JSONL，过滤本 session_id（新增）
   → 统计：总数 / 优化数 / 翻译数 / 纠错数 / fallback 数
-  → 识别高频错误对
   → stderr 输出统计摘要（终端可见）
-  → （v0.2+）写 learning JSONL
+  → （v0.2+）调用 deep model 分析（含 Claude 回复上下文）
+  → 写 learning JSONL
   → 进程退出
 ```
 
@@ -168,6 +182,7 @@ Claude 会话结束
 | D6 跳过逻辑 | `/` `!` 前缀、< 8 字符、纯代码块、URL 前缀 | [00-decisions.md#D6](./00-decisions.md) |
 | D7 API 调用 | `spawnSync('curl', [...])` —— 不能用 `claude` CLI（死锁）| [00-decisions.md#D7](./00-decisions.md) |
 | D8 学习系统 | SessionEnd 生成摘要（MVP），SRS 在 v0.3 | [00-decisions.md#D8](./00-decisions.md) |
+| D14 Claude 回复捕获 | Stop hook + transcript 读取，responses/ 缓存，竞态静默处理 | [00-decisions.md#D14](./00-decisions.md) |
 | D9 实现语言 | Node.js ESM，零 npm 依赖 | [00-decisions.md#D9](./00-decisions.md) |
 | D10 脱敏 | 覆盖 API key、DB 密码、用户名路径、私有 IP、AWS key | [00-decisions.md#D10](./00-decisions.md) |
 | D11 命令格式 | `commands/my-lingo/*.md`（不用旧版 `skills/SKILL.md`）| [00-decisions.md#D11](./00-decisions.md) |
@@ -177,7 +192,7 @@ Claude 会话结束
 
 ## 实现状态（v0.3 完成）
 
-当前状态：**v0.3 全部完成，182 单元测试 + 11 集成测试通过**
+当前状态：**v0.4 进行中（Stop hook + 回复捕获），基础：v0.3 全部完成，182 单元测试 + 11 集成测试通过**
 
 ### v0.1 实现阶段（MVP）
 
@@ -235,6 +250,8 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 │   └── english/
 │       ├── corrections-YYYY-MM.jsonl   # 语法纠错记录
 │       └── items-YYYY-MM.jsonl         # 学习材料
+├── responses/
+│   └── YYYY-MM-DD.jsonl         # Claude 回复缓存（Stop hook 写入）
 └── sessions/
     └── YYYY-MM-DD.jsonl         # 会话摘要（SessionEnd 写入）
 ```

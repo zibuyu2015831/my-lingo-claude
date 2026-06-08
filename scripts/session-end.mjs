@@ -1,6 +1,6 @@
 // SessionEnd hook — does NOT read stdin (D: SessionEnd may have no stdin pipe)
 import process from 'node:process'
-import { readTurnsForDay, writeCorrection, writeLearningItem, writeSession } from './lib/storage.mjs'
+import { readTurnsForDay, writeCorrection, writeLearningItem, writeSession, readResponsesForSession } from './lib/storage.mjs'
 import { loadConfig, loadSpaces, getActiveSpace } from './lib/config.mjs'
 import { buildAnalysisMessages, callDeepModel } from './lib/analysis.mjs'
 
@@ -51,7 +51,8 @@ function main() {
       const shouldAnalyze = activeSpace.auto_generate_learning !== false
       if (!shouldAnalyze || !analysisTargets.length) return
 
-      const messages = buildAnalysisMessages(analysisTargets, config)
+      const responses = readResponsesForSession(sessionId, today)
+      const messages = buildAnalysisMessages(analysisTargets, config, responses)
       if (!messages) return
       const result = callDeepModel(messages, config, { maxTimeSeconds: 12 })
       if (!result) return

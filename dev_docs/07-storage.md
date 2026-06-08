@@ -43,6 +43,10 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 │       ├── corrections-2026-06.jsonl
 │       └── items-2026-06.jsonl
 │
+├── responses/                     # Claude 回复缓存（Stop hook 写入，按日期分片）
+│   ├── 2026-06-01.jsonl
+│   └── ...
+│
 └── sessions/                      # 会话摘要（可选，SessionEnd 写入）
     ├── 2026-06-01.jsonl
     └── ...
@@ -331,9 +335,94 @@ API 凭证必须通过环境变量配置，不得写入任何文件：
 
 **一年后总大小**：约 7MB，JSONL 文件读取速度完全够用。
 
+### 2.5 response 记录（responses/，Stop hook 写入）
+
+每次 Claude 完成一轮回复后，Stop hook 从 transcript 文件提取文本并写入。
+
+```jsonc
+// responses/2026-06-08.jsonl 中一行
+{
+  "ts": "2026-06-08T10:30:00.000Z",
+  "session_id": "abc123def456",
+  "text": "I'll review this code. Here are the main issues I found...",
+  "word_count": 87
+}
+```
+
+**注意事项：**
+- 仅存储纯文本内容（`type === "text"` 的 content block），不含 `thinking` 或 `tool_use`
+- 竞态或文件未准备好时不写记录（不重试），SessionEnd 降级为现有分析
+- 同一 session 的多轮回复按时间顺序追加，`session_id` 用于 SessionEnd 关联
+
 ---
 
-## 6. 迁移路径（v1.0 SQLite）
+## 6. Claude Code Transcript 文件格式（只读参考）
+
+### 6.1 路径规则
+
+Claude Code 将完整对话记录写入：
+
+```
+~/.claude/projects/<path-hash>/<session-id>.jsonl
+```
+
+**path-hash 推导（已验证）：**
+```js
+const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+// 示例：/data/zibuyu/my_lingo_claude → -data-zibuyu-my-lingo-claude
+```
+
+`CLAUDE_SESSION_ID` 在 hook 脚本中通过环境变量获取。
+
+### 6.2 行类型
+
+| `type` 字段值 | 含义 |
+|--------------|------|
+| `mode` | 会话模式记录（无 role） |
+| `permission-mode` | 权限模式记录 |
+| `file-history-snapshot` | 文件快照 |
+| `assistant` | Claude 的回复（含 role: "assistant"） |
+| `user` | 用户输入（含 role: "user"） |
+
+### 6.3 Assistant 回复结构
+
+```json
+{
+  "type": "assistant",
+  "sessionId": "abc123",
+  "timestamp": "2026-06-08T10:30:00.000Z",
+  "isSidechain": false,
+  "message": {
+    "role": "assistant",
+    "model": "claude-sonnet-4-6",
+    "content": [
+      { "type": "thinking", "thinking": "...", "signature": "..." },
+      { "type": "text", "text": "实际回复文本..." },
+      { "type": "tool_use", "id": "toolu_xxx", "name": "Bash", "input": { ... } }
+    ],
+    "usage": { ... }
+  }
+}
+```
+
+### 6.4 高效读取方法
+
+Transcript 文件会随会话增长（每轮约 1–5KB）。Stop hook 只需最新的 assistant 记录，使用尾读策略：
+
+```js
+// 读文件末尾 64KB，足够覆盖约 50 条记录
+const readSize = Math.min(stat.size, 65536)
+const buf = Buffer.alloc(readSize)
+const fd = fs.openSync(filePath, 'r')
+fs.readSync(fd, buf, 0, readSize, stat.size - readSize)
+fs.closeSync(fd)
+const lines = buf.toString('utf8').split('\n').filter(Boolean)
+// 从最后一行向前扫描，找到第一个 type=assistant 且 sessionId 匹配的记录
+```
+
+---
+
+## 7. 迁移路径（v1.0 SQLite）
 
 当需要迁移到 SQLite 时，执行以下步骤：
 

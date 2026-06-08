@@ -19,6 +19,8 @@ import {
   listItemMonths,
   updateLearningItemReview,
   readItemsDue,
+  writeResponseRecord,
+  readResponsesForSession,
 } from '../scripts/lib/storage.mjs'
 
 function withTempData(fn) {
@@ -404,5 +406,68 @@ test('readItemsDue: directory missing → empty array, no throw', () => {
     const due = readItemsDue('nonexistent-space')
     assert.ok(Array.isArray(due))
     assert.equal(due.length, 0)
+  })
+})
+
+// ── v0.4: writeResponseRecord + readResponsesForSession ─────────────────────
+
+test('writeResponseRecord: creates responses file in correct path', () => {
+  withTempData((dir) => {
+    writeResponseRecord({ session_id: 'sess-001', text: 'Hello response', word_count: 2 })
+    const file = path.join(dir, 'my-lingo', 'responses', `${TODAY}.jsonl`)
+    assert.ok(fs.existsSync(file), `responses file not found: ${file}`)
+  })
+})
+
+test('writeResponseRecord: record is readable with correct fields', () => {
+  withTempData(() => {
+    writeResponseRecord({ session_id: 'sess-001', text: 'Review complete.', word_count: 2 })
+    const records = readResponsesForSession('sess-001', TODAY)
+    assert.ok(records.length >= 1, 'should have at least 1 record')
+    const r = records[0]
+    assert.equal(r.session_id, 'sess-001')
+    assert.equal(r.text, 'Review complete.')
+    assert.equal(r.word_count, 2)
+    assert.ok(typeof r.ts === 'string', 'should have ts field')
+  })
+})
+
+test('readResponsesForSession: filters by session_id', () => {
+  withTempData(() => {
+    writeResponseRecord({ session_id: 'sess-A', text: 'Response A', word_count: 2 })
+    writeResponseRecord({ session_id: 'sess-B', text: 'Response B', word_count: 2 })
+    const resultsA = readResponsesForSession('sess-A', TODAY)
+    assert.ok(resultsA.every(r => r.session_id === 'sess-A'), 'should only return sess-A records')
+    assert.ok(!resultsA.some(r => r.session_id === 'sess-B'), 'should not return sess-B records')
+  })
+})
+
+test('readResponsesForSession: multiple responses for same session are all returned', () => {
+  withTempData(() => {
+    writeResponseRecord({ session_id: 'sess-X', text: 'Turn 1 response', word_count: 3 })
+    writeResponseRecord({ session_id: 'sess-X', text: 'Turn 2 response', word_count: 3 })
+    const results = readResponsesForSession('sess-X', TODAY)
+    assert.ok(results.length >= 2, 'should return all responses for session')
+  })
+})
+
+test('readResponsesForSession: nonexistent date → empty array, no throw', () => {
+  withTempData(() => {
+    const results = readResponsesForSession('sess-001', '1990-01-01')
+    assert.ok(Array.isArray(results))
+    assert.equal(results.length, 0)
+  })
+})
+
+test('writeResponseRecord: write failure does not throw', () => {
+  withTempData((dir) => {
+    const respDir = path.join(dir, 'my-lingo', 'responses')
+    fs.mkdirSync(respDir, { recursive: true })
+    fs.chmodSync(respDir, 0o444)
+    try {
+      assert.doesNotThrow(() => writeResponseRecord({ session_id: 'sess-001', text: 'test', word_count: 1 }))
+    } finally {
+      fs.chmodSync(respDir, 0o755)
+    }
   })
 })

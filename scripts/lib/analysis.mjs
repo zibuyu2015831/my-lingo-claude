@@ -1,16 +1,19 @@
 import { spawnSync } from 'node:child_process'
 import { getApiKey } from './api.mjs'
 
-export function buildAnalysisMessages(turns, config) {
+// responses: optional array of { text, word_count } from Stop hook (Claude's replies)
+export function buildAnalysisMessages(turns, config, responses = []) {
   if (!turns || turns.length === 0) return null
 
   const nativeLang = (config && config.native_language) || 'zh-CN'
   const targetLang = (config && config.target_language) || 'English'
 
+  const hasResponses = Array.isArray(responses) && responses.length > 0
+
   const systemContent = `You are a language learning assistant for a developer learning ${targetLang}.
 The developer's native language is ${nativeLang}.
 
-Analyze the difference between the user's original prompt and the optimized version.
+Analyze the difference between the user's original prompt and the optimized version.${hasResponses ? "\nAlso use Claude's responses as examples of high-quality target language usage to extract learning points." : ''}
 Generate learning content that helps them improve their ${targetLang} expression
 in technical, AI-coding contexts.
 
@@ -27,7 +30,15 @@ Rules:
     const lang = t.detected_language || 'unknown'
     return `Turn ${i + 1} (detected: ${lang}):\nOriginal: ${t.original_prompt || ''}\nOptimized: ${t.execution_prompt || ''}`
   })
-  const userContent = userLines.join('\n\n')
+  let userContent = userLines.join('\n\n')
+
+  if (hasResponses) {
+    userContent += '\n\n--- Claude\'s responses this session ---\n'
+    responses.forEach((r, i) => {
+      const preview = r.text.length > 300 ? r.text.slice(0, 300) + '...' : r.text
+      userContent += `\nResponse ${i + 1} (${r.word_count || '?'} words):\n${preview}\n`
+    })
+  }
 
   return {
     messages: [

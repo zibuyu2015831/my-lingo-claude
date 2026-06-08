@@ -401,3 +401,139 @@ if (rawPrompt.startsWith('--')) { /* 处理 --，return */ }
 const isRefine = rawPrompt.startsWith('::')
 if (shouldSkip(rawPrompt)) return   // 此时 -- 已被处理，不会误拦截
 ```
+
+---
+
+## 5. Stop Hook
+
+### 5.1 触发时机
+
+`Stop` 钩子在**每次 Claude 完成一轮回复**后触发（而非整个会话结束），是捕获 Claude 回复内容的唯一时机。
+
+| Hook | 触发时机 | 用途 |
+|------|---------|------|
+| `UserPromptSubmit` | 用户发送 prompt 前 | 拦截并优化 prompt |
+| `Stop` | 每轮 Claude 回复完成后 | 捕获 Claude 的文本回复 |
+| `SessionEnd` | 整个会话结束时 | 批量学习分析 |
+
+### 5.2 Claude Code Transcript 文件机制
+
+Claude Code 将完整对话（含 Claude 回复）实时写入本地 JSONL 文件：
+
+**路径规则：**
+```
+~/.claude/projects/<path-hash>/<session-id>.jsonl
+```
+
+**path-hash 推导算法（已通过实验验证）：**
+```js
+// /data/zibuyu/my_lingo_claude → -data-zibuyu-my-lingo-claude
+const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+```
+将 cwd 中所有 `/` 和 `_` 替换为 `-`（前导 `/` 变为前导 `-`）。
+
+**JSONL 行格式（assistant 回复，实验确认）：**
+```json
+{
+  "type": "assistant",
+  "sessionId": "abc123def456",
+  "timestamp": "2026-06-08T10:30:00.000Z",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "thinking", "thinking": "...", "signature": "..." },
+      { "type": "text", "text": "Claude 的实际文本回复..." },
+      { "type": "tool_use", "id": "...", "name": "Bash", "input": { ... } }
+    ]
+  }
+}
+```
+
+学习内容提取只需关注 `type === "text"` 的 content block，忽略 `thinking` 和 `tool_use`。
+
+### 5.3 设计约束：不影响用户交互
+
+Stop hook **会阻塞**用户输入下一条命令，因此设计约束严格：
+
+| 约束 | 原因 |
+|------|------|
+| **无 API 调用** | 会增加 2–8s 可感知延迟 |
+| **无 sleep / 重试** | 延迟直接影响交互响应 |
+| **目标 < 200ms** | 仅涉及本地文件读写，完全可行 |
+| **所有错误静默** | 学习数据缺失不影响核心功能 |
+| **始终 exit 0** | 非 0 退出会在 Claude Code 界面显示报错 |
+
+### 5.4 竞态条件处理
+
+**潜在竞态：** transcript 写入 vs Stop hook 触发之间无官方顺序保证。
+
+**兜底策略（无 sleep，无 retry）：**
+```
+尝试读取 transcript JSONL 尾部 64KB
+  → 文件不存在：静默退出（session 尚无记录，或首次 slash 命令）
+  → 文件存在但无匹配 assistant 记录：静默退出（可能竞态，不重试）
+  → 找到匹配记录：提取文本 → 写入 responses/{today}.jsonl → exit 0
+  → 任意步骤抛出异常：catch 块静默处理，exit 0
+```
+
+**降级安全（SessionEnd）：**
+- 有 response 数据 → 分析包含 original→optimized→Claude 回复，学习材料更丰富
+- 无 response 数据 → 回退到仅分析 original→optimized 对比（现有行为），不中断
+
+### 5.5 完整数据流
+
+```
+[每轮结束]
+  Stop hook 触发（scripts/stop.mjs）
+  → 读 ~/.claude/projects/<hash>/<session-id>.jsonl 尾部
+  → 提取最新 assistant text（按 sessionId 过滤）
+  → 写 $PLUGIN_DATA/my-lingo/responses/{today}.jsonl
+  → exit 0（< 200ms）
+
+[会话结束]
+  SessionEnd hook 触发（scripts/session-end.mjs）
+  → 读 turns/{today}.jsonl（现有）
+  → 读 responses/{today}.jsonl（新增）
+  → 按 session_id 关联，传给 deep model 学习分析
+  → 写 learning/ corrections + items
+```
+
+### 5.6 Stop Hook 脚本结构
+
+```javascript
+// scripts/stop.mjs
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
+import process from 'node:process'
+import { writeResponseRecord } from './lib/storage.mjs'
+
+// path-hash 推导：/ 和 _ 均替换为 -
+function transcriptPath(cwd, sessionId) {
+  const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+  return path.join(os.homedir(), '.claude', 'projects', hash, `${sessionId}.jsonl`)
+}
+
+// 读文件尾部 maxBytes 字节（避免大文件全量读取）
+function readTailBytes(filePath, maxBytes) { ... }
+
+// 从 transcript chunk 中提取最新 assistant 文本（按 sessionId 过滤，倒序扫描）
+function extractLastResponse(chunk, sessionId) { ... }
+
+function main() {
+  try {
+    const sessionId = process.env.CLAUDE_SESSION_ID
+    if (!sessionId) return
+    const tPath = transcriptPath(process.cwd(), sessionId)
+    if (!fs.existsSync(tPath)) return
+    const chunk = readTailBytes(tPath, 65536)
+    const text = extractLastResponse(chunk, sessionId)
+    if (!text) return
+    writeResponseRecord({ session_id: sessionId, text, word_count: ... })
+  } catch {
+    // 始终静默，exit 0
+  }
+}
+
+main()
+```

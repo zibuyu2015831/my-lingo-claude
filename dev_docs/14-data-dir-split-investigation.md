@@ -1,6 +1,8 @@
 # Data Dir Split — Hook 与 Slash Command 写读不同目录的排查记录
 
-> **状态**：✅ 根因已通过 live 系统实测 + 代码 grep 双重确认（见 §〇.5）。方案 F 已修正一处会致其半失效的代码陷阱（`plugin_root` 改用 `import.meta.url`，见测点 4 / B11）。**可进入实施**，仅卡在 2 个不可逆决策点（迁移方向 C vs F+D、`data.db` 合并策略）—— 见 §七.4 实施就绪度评估
+> **状态**：✅ 根因已通过 live 系统实测 + 代码 grep + Claude Code 官方文档三重确认。**架构已定稿（见 §十）**：转正规 `/plugin install`（方案 C）+ 指针文件（方案 F，命令唯一可靠的定位手段）+ **数据清零不迁移**（项目未发布，无包袱）。可进入实施。
+>
+> **关键定论（官方文档背书）**：slash command 的 bash 子进程**无论何种安装形态都拿不到 `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` 环境变量**（这是 Claude Code 的执行通道决定的，与"软链 vs marketplace"无关）。因此**方案 C 解决不了命令的数据访问问题**，指针文件（F）在正规安装下**依然是结构性必需**。且 per-plugin 数据目录路径**不是官方稳定契约**（marketplace 大概率 `…/data/<name>/`，但属内部实现细节），故**不能硬编码路径**，必须由"知情的 hook"写指针。
 > **发现日期**：2026-06-08（2026-06-08 基于代码 + 运行环境复核并修订）
 > **影响范围**：**全部 16 个 slash command 都受影响**（不止最初认定的 4 个）。其中 `space / mode / use / setup` 4 个是"写错目录 / 读错目录"，另外 12 个只读命令同样读错目录，只是因为假目录里没有 `data.db` 而表现为"空数据"而非"报错"
 > **影响版本**：v0.5（commit `7ba2ffd` 修复了 module-resolution 崩溃，但**没有**修复数据目录分裂；见 §三 修订）
@@ -477,9 +479,11 @@ export function getDataDir() {
 
 ## 七.5、待用户决策的问题
 
-1. ~~是否先做前置诊断~~ —— **已实测，无需再做**（§〇.5：两变量在命令里皆空）。现在的决策是直接选**方案 F+D 组合**还是更激进的**方案 C（转正规安装）**。
-2. **数据合并范围**：确认要合并的是**两个目录的全部数据文件**（data.db / jsonl / config.json / spaces.json / circuit.json），而不仅 `spaces.json`（§四"新发现 1"）。`data.db` 是否同意按主键去重合并？
-3. **遗留 `turns/*.jsonl`（真目录 06-08、假目录 06-06）如何处理**？建议：先确认是否已进 `data.db`（06-06 那批可能从未导入），导入后归档/删除。已确认当前 v0.5 代码不再写 JSONL。
+> **⚠️ 本节 1–3 已被 §十 定稿取代**（C + 指针 F、数据清零不迁移）。随之作废：B3/B4（双 db 选优/合并）、Plan D 探测、§六-E 里的"数据合并"与"D 兜底"步骤。下面仅保留 4–6 仍有效的收尾项。
+
+1. ~~F+D 还是 C~~ —— **已定稿（§十）：方案 C + 指针 F 叠加，二者非二选一。**
+2. ~~数据合并范围 / `data.db` 去重~~ —— **已定稿（§十）：不合并，tarball 备份后清零重来。**
+3. ~~遗留 `turns/*.jsonl` 如何处理~~ —— **随清零一并备份后删除，无需导入。**
 4. **是否给 `paths.mjs` 加一次性 stderr 警告**：当走到"探测/指针/假目录"兜底分支时打印"⚠ 开发模式部署，数据目录经兜底解析为 X"，便于发布前确认兜底未被生产触发？
 5. **`spaces.json` 双向不可见（§四新发现 2）是否单列 issue**：用户新增/切换语言空间 hook 不可知。F 落地后此问题随之消失（统一目录），但在修复前它是高危。
 6. **是否顺手把 `mode.md` 的非原子写改为原子写 / 统一走 `writeConfig()`**（B7）？
@@ -539,3 +543,85 @@ stat -c '%y %n' \
 - v0.5 Phase 2.5（只读命令 SQLite 化）：见 [`./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md)；本问题是该 Phase 的回归补充 —— commit `7ba2ffd` 只缓解了 module-resolution 崩溃（且仅在 `cwd==插件源码` 时有效），**数据目录分裂未被修复，且 16 个命令全部中招**。
 - 环境变量配置：见 [`12-env-var-config.md`](./12-env-var-config.md)；建议补充"`CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` 的注入边界"一节，并写明本次实测结论：**两变量在 hook 命令串里经模板展开可用，但在 slash command 的 bash 进程里均不可作为环境变量读取**。
 - 命令实现风格统一：见 [`13-raw-prefix-rename.md`](./13-raw-prefix-rename.md) 同期的命令清理思路；本问题暴露当前存在"内联 `node -e` 直读 env" vs "import storage.mjs 经 getDataDir" 两套路径逻辑，建议借修复一并收敛为一套（方案 A 的清理目标）。
+
+---
+
+## 十、最终架构决策（2026-06-08 定稿，**取代 §六的方案权衡**）
+
+本节是落地依据。前面 §六的 A–F 是过程性的方案探索，下列决策**取代**那场权衡。
+
+### 10.1 三项决策
+
+| 决策 | 选择 | 依据 |
+|------|------|------|
+| **迁移方向** | ✅ **方案 C：转正规 `/plugin install`** | 根除 `-skills-dir` 后缀、消除"软链/正规"双形态歧义、与最终发布路径一致 |
+| **命令数据访问** | ✅ **方案 F：hook 写指针文件**（C 之上仍然必需） | 官方文档背书：命令 bash **任何安装形态**都拿不到环境变量；数据目录路径**非稳定契约**不可硬编码 → 只有"知情的 hook"能把真相写下来 |
+| **`data.db` / 历史数据** | ✅ **清零，不迁移**（备份成 tarball 后删两目录） | 项目未发布，两库仅 dev 测试噪声；写/测/删一个一次性合并脚本本身就是包袱；保留合并路径会逼着 `paths.mjs` 永久背着 Plan D 探测逻辑 |
+
+> **关键澄清**：方案 C 与方案 F **不是二选一，是叠加**。C 让 hook 侧的数据目录变干净（无 `-skills-dir`），F 解决"env-blind 的命令如何找到这个目录"。缺了 F，正规安装后命令仍然读不到数据。
+
+### 10.2 定稿后的目标架构
+
+```
+                    ┌─────────────────────────────────────────────┐
+   hook 进程         │ env 齐全：CLAUDE_PLUGIN_DATA + 模板展开定位     │
+  （特权方）         │ ① getDataDir() 由 CLAUDE_PLUGIN_DATA 解析真目录 │
+                    │ ② import.meta.url 推导 plugin_root（不用 env）  │
+                    │ ③ 原子写 install.json 指针（内容未变则跳过）     │
+                    └───────────────────┬─────────────────────────┘
+                                        │ 写
+                          ~/.claude/plugins/data/my-lingo/install.json
+                          { plugin_root, data_dir }   ← 固定位置，零 env 依赖
+                                        │ 读
+                    ┌───────────────────┴─────────────────────────┐
+   命令进程          │ env 全空：靠纯 Node 内建读指针                  │
+  （env-blind）      │ ① 读 install.json.plugin_root → import 模块     │
+                    │ ② getDataDir() 经指针拿 data_dir → 读数据        │
+                    └─────────────────────────────────────────────┘
+```
+
+`paths.mjs::getDataDir()` 回退链（**Plan D 探测已删除**）：
+
+```javascript
+export function getDataDir() {
+  // ① hook 进程：env 直达
+  if (process.env.CLAUDE_PLUGIN_DATA) return process.env.CLAUDE_PLUGIN_DATA   // 见 10.3：不再 join('my-lingo')
+  // ② 命令进程：读指针
+  try {
+    const p = path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json')
+    const { data_dir } = JSON.parse(fs.readFileSync(p, 'utf8'))
+    if (data_dir) return data_dir
+  } catch {}
+  // ③ 失败要响 —— 不再静默回退假目录（静默假目录正是本 bug 的根源）
+  throw new Error('[my-lingo] data dir unresolved: send one message to initialize the plugin, then retry.')
+}
+```
+
+### 10.3 借"无包袱"一并清理的设计债
+
+1. **去掉双层 `my-lingo` 嵌套**：正规安装下 `CLAUDE_PLUGIN_DATA` 本身就是 per-plugin 目录，`path.join(base, 'my-lingo')` 会得到 `…/data/my-lingo/my-lingo`，内层冗余。定稿后 `getDataDir()` 直接用 `CLAUDE_PLUGIN_DATA`（或一个语义子目录，但不要再拼插件名）。
+2. **删除静默假目录回退**：旧 `CLAUDE_PLUGIN_DATA || FALLBACK_DIR` 的"静默兜底"是"0 turns 还不报错"的元凶。改为"解析不到就抛错并指引用户"。
+3. **删除 Plan D 的 `-skills-dir` 探测 / 双 db 选优**：清零后无历史目录可探，这些逻辑无存在意义。
+4. **命令路径逻辑收敛为一套**：消灭"内联 `node -e` 直读 env" vs "import 经 getDataDir"的双轨，全部统一走"读指针 → import → getDataDir"。
+
+### 10.4 唯一需要专门设计的边界：`setup` 的冷启动
+
+`setup` 在**任何 hook 跑过之前**就要运行 → 那时指针还不存在 → `getDataDir()` 会抛错（10.2 的③）。解法（择一，倾向 A）：
+
+- **A（推荐）**：让"首次有效配置"不依赖写盘 —— API 凭证已走环境变量（见 `status.md`），其余用代码内置默认；把"需要落盘的配置"（`mode` / `use` 改的 `config.json` / `spaces.json`）的写入时机推迟到"用户至少发过一条消息、指针已就绪"之后。`setup` 退化为"校验 env + 打印下一步指引"，不写数据目录。
+- **B**：`setup` 末尾**主动触发一次 hook 自检**（若 Claude Code 提供此能力）来催生指针。复杂、依赖未确认的能力，不优先。
+
+### 10.5 定稿后的实施顺序
+
+1. **备份**两数据目录为 tarball，然后**删除**（清零）。
+2. 改 `.claude-plugin/plugin.json` / 本地 marketplace，走通 `/plugin install` 正规安装；安装后**实测一次** `CLAUDE_PLUGIN_DATA` 的真实取值（确认无 `-skills-dir`、确认 10.3-①的去嵌套正确）。
+3. 改 `paths.mjs`：新回退链（env → 指针 → 抛错）、去双层嵌套、删 Plan D。
+4. hook 入口加指针写入（`import.meta.url` + 原子写 + 内容未变跳过）。
+5. 16 个命令换统一引导片段（读指针定位 ROOT）；`mode/use/setup` 顺带改原子写、按 10.4-A 调整 setup。
+6. 测试：补 PT-013"无 env + 陌生 cwd + 指针存在 → 命中真目录"用例；补"指针缺失 → 抛清晰错误而非静默 0"用例；补"写后另一条读链读回同目录"断言。
+7. 全量 222+12 + 手动 `/tmp` 下复现 B1 验证不再崩。
+
+### 10.6 仍待你确认的两点（其余已定）
+
+1. **数据清零的执行**：同意"tarball 备份后删除两目录、从空库重来"吗？（这是唯一不可逆动作，需你点头我才删）
+2. **`setup` 走 10.4-A**（不写盘、退化为校验+指引）是否可接受它不再负责初始化 `spaces.json`？

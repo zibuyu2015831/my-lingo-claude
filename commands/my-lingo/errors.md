@@ -12,8 +12,9 @@ Show the most common language errors from the current language space, aggregated
 
 ```bash
 node --input-type=module --eval "
-import { loadSpaces } from './scripts/lib/config.mjs';
-import { readCorrections } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs');
+const { readCorrections } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 // Get active space
 let activeSpace = 'english';

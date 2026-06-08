@@ -12,7 +12,8 @@ Show the most recent non-skipped prompt optimization from today (or yesterday if
 
 ```bash
 node --input-type=module --eval "
-import { readRecentTurns } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { readRecentTurns } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 // Newest turns first (DESC by id); a window of 20 comfortably spans the most
 // recent activity regardless of day boundary.
@@ -23,8 +24,12 @@ if (!turns.length) {
   process.exit(0);
 }
 
-// get most recent non-raw, non-original record (turns already newest-first)
-const record = turns.find(r => r.mode !== 'raw' && r.mode !== 'original') || turns[0];
+// Most recent record that is an actual optimization (has an execution prompt and
+// is not a fallback); fall back to any non-raw/original turn, then to anything.
+const record =
+  turns.find(r => r.execution_prompt && !r.fallback && r.mode !== 'raw' && r.mode !== 'original')
+  || turns.find(r => r.mode !== 'raw' && r.mode !== 'original')
+  || turns[0];
 
 console.log('');
 console.log('── My Lingo: Last Optimization ──────────────────────');

@@ -7,7 +7,18 @@ export { getDataDir } from './paths.mjs'
 
 // ── value coercion (node:sqlite cannot bind booleans, undefined, or objects) ──
 const b = (v) => (v ? 1 : 0)                       // boolean -> 0/1
-const n = (v) => (v === undefined ? null : v)      // undefined -> null (string/number/null passthrough)
+// undefined/null -> null; string/number/bigint pass through; anything else
+// (boolean/object/array) -> JSON text. This guarantees .run() never throws on a
+// non-bindable value — critical because correction/item fields come from
+// untrusted LLM output. A malformed field would otherwise throw inside a write
+// helper's catch{}, silently dropping the row while the turn is still marked
+// analyzed (permanent loss, no retry). Coercing forward keeps the row + progress.
+const n = (v) => {
+  if (v === undefined || v === null) return null
+  const t = typeof v
+  if (t === 'string' || t === 'number' || t === 'bigint') return v
+  return JSON.stringify(v)
+}
 
 // Integer flag columns read back as 0/1; restore boolean semantics for callers/tests.
 function normalizeTurn(row) {

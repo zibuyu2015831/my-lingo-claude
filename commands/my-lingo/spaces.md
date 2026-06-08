@@ -12,8 +12,9 @@ List all configured language spaces with their turns and corrections statistics.
 
 ```bash
 node --input-type=module --eval "
-import { loadSpaces } from './scripts/lib/config.mjs';
-import { countTurnsForSpace, countCorrectionsForSpace } from './scripts/lib/storage.mjs';
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs');
+const { countTurnsForSpace, countCorrectionsForSpace } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 // Load spaces
 let spaces = { active: 'english', spaces: { english: { key: 'english', display_name: 'English', target_language: 'en', native_language: 'zh-CN', level: 'intermediate' } } };

@@ -15,6 +15,7 @@ import {
   writeConfig, writeCircuitJson, circuitJsonExists, readCircuitJson,
   seedTurns, readTurnsForDate, seedCorrections, seedItems, dbCall,
   runHookSync, runHookAsync, runSessionEnd, runSessionEndAsync,
+  runCommandBlock,
   ROOT,
 } from './helpers.mjs'
 
@@ -282,8 +283,15 @@ test('PT-009: session-end analysis — writes corrections and sessions JSONL', a
     const corrections = dbCall(dataDir, 'readCorrections', ['english', [currentMonth]])
     assert.ok(corrections.length >= 1, `should have at least 1 correction, got: ${corrections.length}`)
 
+    const items = dbCall(dataDir, 'readLearningItems', ['english', [currentMonth]])
+    assert.ok(items.length >= 1, `should have at least 1 learning item, got: ${items.length}`)
+
     const sessionRow = dbCall(dataDir, 'readSession', [sessionId])
     assert.ok(sessionRow, `session row should exist for ${sessionId}`)
+
+    // Turns must be marked analyzed so a rerun is an idempotent no-op.
+    const unanalyzed = dbCall(dataDir, 'readUnanalyzedTurns', [sessionId])
+    assert.equal(unanalyzed.length, 0, 'all turns should be marked analyzed after a successful run')
   } finally {
     cleanup(dataDir)
     await stopServer(server)
@@ -402,6 +410,66 @@ test('PT-012: readItemsDue — correctly filters due items, null sorts first', (
     const bIdx = dueTss.indexOf('ts-b')
     const aIdx = dueTss.indexOf('ts-a')
     assert.ok(bIdx < aIdx, `null item (B) should come before past item (A), got order: ${dueTss}`)
+  } finally {
+    cleanup(dataDir)
+  }
+})
+
+// ── PT-013: data commands resolve modules from a foreign cwd ──────────────────
+// Regression guard: commands must import via $CLAUDE_PLUGIN_ROOT, not a cwd-
+// relative './scripts/...' path. In real use the command's bash runs in the
+// USER'S project dir, not the plugin root — a relative import throws
+// ERR_MODULE_NOT_FOUND there. Every other helper runs with cwd:ROOT and so
+// masked this; runCommandBlock deliberately runs from os.tmpdir().
+
+test('PT-013: data commands run from a foreign cwd and render seeded data', () => {
+  const dataDir = makeTmpDir()
+  try {
+    const sessionId = 'test-session-013'
+    writeConfig(dataDir, { execution_mode: 'english_optimized', native_language: 'zh-CN' })
+    fs.writeFileSync(
+      path.join(dataDir, 'my-lingo', 'spaces.json'),
+      JSON.stringify({ active: 'english', spaces: { english: {} } }),
+    )
+
+    seedTurns(dataDir, [
+      { session_id: sessionId, mode: 'english_optimized', detected_language: 'en',
+        original_prompt: 'helo wrld', execution_prompt: 'Hello world', rewrite_type: 'correction', fallback: false },
+    ])
+    seedCorrections(dataDir, 'english', [
+      { ts: new Date().toISOString(), session_id: sessionId, type: 'grammar',
+        original: 'helo wrld', corrected: 'hello world', explanation: 'spelling', pattern: 'spelling' },
+    ])
+    seedItems(dataDir, 'english', [
+      { ts: new Date().toISOString(), session_id: sessionId, type: 'phrase',
+        target_text: 'kick off', native_explanation: '开始' },
+      { ts: new Date().toISOString(), session_id: sessionId, type: 'sentence_pattern',
+        target_text: 'Could you ...?', native_explanation: '请求' },
+    ])
+
+    // [command, substring that only appears when seeded data was actually read]
+    const cases = [
+      ['status', 'Total turns:  1'],
+      ['recent', 'helo wrld'],
+      ['last', 'Hello world'],
+      ['errors', 'hello world'],
+      ['space', 'english'],
+      ['spaces', 'english'],
+      ['vocab', 'kick off'],
+      ['sentences', 'Could you ...?'],
+      ['review', 'kick off'],
+      ['profile', 'Total turns:'],
+      ['export', 'kick off'],
+    ]
+
+    for (const [name, needle] of cases) {
+      const r = runCommandBlock(name, { dataDir })
+      assert.equal(r.status, 0, `/${name} should exit 0 from a foreign cwd, stderr: ${r.stderr}`)
+      assert.ok(
+        r.stdout.includes(needle),
+        `/${name} output should contain "${needle}" (seeded data not rendered). Got:\n${r.stdout}\n${r.stderr}`,
+      )
+    }
   } finally {
     cleanup(dataDir)
   }

@@ -27,7 +27,8 @@ export function getDb() {
   _db.exec('PRAGMA journal_mode=WAL')   // multi-process: concurrent readers + one writer
   _db.exec('PRAGMA busy_timeout=3000')  // wait up to 3s on write contention before SQLITE_BUSY
   _db.exec('PRAGMA synchronous=NORMAL') // safe + faster under WAL
-  _db.exec('PRAGMA foreign_keys=ON')
+  // (no foreign_keys pragma: the schema declares no FK constraints, so it would
+  //  be a no-op that misleadingly implies referential enforcement.)
   initSchema(_db)
   try { fs.chmodSync(dbPath, 0o600) } catch {} // match the 0o600 file convention, best-effort
   return _db

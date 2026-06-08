@@ -188,3 +188,35 @@ export function seedCorrections(dataDir, space, records) {
 export function seedItems(dataDir, space, records) {
   for (const r of records) dbCall(dataDir, 'writeLearningItem', [r, space])
 }
+
+// Extract the fenced ```bash blocks from a command markdown file.
+export function commandBashBlocks(commandName) {
+  const md = fs.readFileSync(path.join(ROOT, 'commands/my-lingo', `${commandName}.md`), 'utf8')
+  const blocks = []
+  const re = /```bash\n([\s\S]*?)```/g
+  let m
+  while ((m = re.exec(md))) blocks.push(m[1])
+  return blocks
+}
+
+// Run a command's bash block from a FOREIGN cwd (NOT the plugin root), exactly
+// as Claude Code does when a user invokes the slash command from their own
+// project. This is the configuration that catches cwd-relative module-resolution
+// bugs — every other helper runs with cwd:ROOT and so cannot surface them.
+export function runCommandBlock(commandName, { dataDir, blockIndex = 0, env = {} } = {}) {
+  const blocks = commandBashBlocks(commandName)
+  const script = blocks[blockIndex]
+  if (!script) throw new Error(`no bash block #${blockIndex} in ${commandName}.md`)
+  const res = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    cwd: os.tmpdir(),               // deliberately NOT the plugin root
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: ROOT,     // how Claude Code locates plugin scripts
+      CLAUDE_PLUGIN_DATA: dataDir,
+      ARGUMENTS: '',
+      ...env,
+    },
+  })
+  return { status: res.status, stdout: res.stdout || '', stderr: res.stderr || '' }
+}

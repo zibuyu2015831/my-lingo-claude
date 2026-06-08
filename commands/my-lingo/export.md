@@ -15,12 +15,13 @@ Export all learning materials for the selected language space as Markdown to std
 node --input-type=module << 'EOF'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig, loadSpaces, getActiveSpace } from './scripts/lib/config.mjs'
-import {
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+const { loadConfig, loadSpaces, getActiveSpace } = await import(ROOT + '/scripts/lib/config.mjs')
+const {
   listCorrectionMonths, readCorrections,
   listItemMonths, readLearningItems,
   getDataDir,
-} from './scripts/lib/storage.mjs'
+} = await import(ROOT + '/scripts/lib/storage.mjs')
 
 const args = process.argv.slice(2)
 const spaceIdx = args.indexOf('--space')

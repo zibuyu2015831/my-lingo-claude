@@ -597,3 +597,42 @@ test('purgeAll: clears all data, keeps sessions when requested', () => {
     assert.equal(readSession('sK'), null, 'session should now be gone')
   })
 })
+
+// ── value coercion: malformed (non-bindable) fields must not drop the row ─────
+
+test('writeCorrection: object/array fields are coerced to text, not dropped', () => {
+  withTempData(() => {
+    // node:sqlite cannot bind objects/arrays; without coercion .run() throws
+    // inside the helper's catch{} and the row is silently lost. Simulates a
+    // malformed LLM analysis result (pattern as array, original as object).
+    writeCorrection({
+      type: 'grammar',
+      original: { raw: 'helo' },
+      corrected: 'hello',
+      explanation: 'spelling',
+      pattern: ['spelling', 'typo'],
+    }, 'english')
+
+    const rows = readCorrections('english', [CURRENT_MONTH])
+    assert.equal(rows.length, 1, 'malformed correction must still be written')
+    assert.equal(rows[0].corrected, 'hello')
+    assert.equal(typeof rows[0].pattern, 'string', 'array field coerced to text')
+    assert.equal(rows[0].pattern, JSON.stringify(['spelling', 'typo']))
+    assert.equal(rows[0].original, JSON.stringify({ raw: 'helo' }))
+  })
+})
+
+test('writeLearningItem: object field is coerced to text, not dropped', () => {
+  withTempData(() => {
+    writeLearningItem({
+      type: 'phrase',
+      target_text: 'kick off',
+      native_explanation: { zh: '开始' },
+    }, 'english')
+
+    const rows = readLearningItems('english', [CURRENT_MONTH])
+    assert.equal(rows.length, 1, 'malformed item must still be written')
+    assert.equal(rows[0].target_text, 'kick off')
+    assert.equal(rows[0].native_explanation, JSON.stringify({ zh: '开始' }))
+  })
+})

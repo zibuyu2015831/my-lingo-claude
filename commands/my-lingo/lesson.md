@@ -12,7 +12,7 @@ Generate a personalized language lesson based on your recent interactions and le
 ### Step 1: Generate the lesson
 
 ```bash
-node scripts/generate-lesson.mjs $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/generate-lesson.mjs" $ARGUMENTS
 ```
 
 ### Step 2: Display the lesson

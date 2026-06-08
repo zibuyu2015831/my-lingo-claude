@@ -237,3 +237,54 @@ Output the status in this format:
 | `MY_LINGO_API_KEY` | API key 环境变量覆盖（优先级高于 config.json）| 用户手动设置 |
 
 **注意**：`CLAUDE_CODE_USE_BEDROCK` 不适用于 My Lingo——My Lingo 调用的是用户自选的外部 API（OpenAI / DeepSeek 等），不通过 Anthropic Bedrock。
+
+---
+
+## 7. 开发环境配置（本地调试模式）
+
+开发阶段推荐使用**软链接注册**，让 Claude Code 直接读取仓库源码，无需每次修改后重新安装插件。
+
+### 7.1 注册方式
+
+Claude Code 会自动加载 `~/.claude/skills/` 目录下的所有插件。创建软链接将仓库注册到该目录即可：
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s /path/to/my-lingo-claude ~/.claude/skills/my-lingo
+```
+
+注册后重启 Claude Code，插件以 `my-lingo@skills-dir` 身份加载：
+
+```
+Skills-directory plugins (.claude/skills/*):
+  ❯ my-lingo@skills-dir
+    Version: 0.1.0
+    Scope: user
+    Path: ~/.claude/skills/my-lingo
+    Status: ✔ loaded
+```
+
+### 7.2 开发工作流
+
+| 操作 | 是否需要重启 Claude |
+|------|-------------------|
+| 修改 `scripts/` hook 脚本 | 否（hook 每次触发时实时读取） |
+| 修改 `commands/my-lingo/*.md` 命令文件 | 是（Claude Code 启动时缓存命令列表） |
+| 修改 `.claude-plugin/plugin.json` | 是 |
+| 修改 `hooks/hooks.json` | 是 |
+
+### 7.3 验证注册状态
+
+```bash
+# 查看插件列表与加载状态
+claude plugin list
+
+# 验证 plugin.json 及所有组件
+claude plugin validate ~/.claude/skills/my-lingo
+```
+
+### 7.4 注意事项
+
+- 软链接指向仓库根目录（含 `.claude-plugin/plugin.json`），**不要**指向 `.claude-plugin/` 子目录
+- `hooks/hooks.json` 和 `commands/` 由 Claude Code 自动发现，**不要**在 `plugin.json` 中重复声明（否则触发"重复 hooks 文件"错误）
+- 调试 hook 脚本时可设置环境变量 `MY_LINGO_DEBUG=1` 开启详细日志（输出到 stderr）

@@ -13,7 +13,7 @@
     "UserPromptSubmit": [
       {
         "matcher": "*",
-        "description": "Content-based filtering is impossible at the hook-config layer, so all filtering happens inside the script. The script skips: (1) slash commands starting with '/', (2) shell commands starting with '!' — EXCEPT '!raw' which is a My Lingo escape prefix handled before skip logic, (3) prompts under 8 chars, (4) pure code blocks, (5) URL/shell prefixes.",
+        "description": "Content-based filtering is impossible at the hook-config layer, so all filtering happens inside the script. The script skips: (1) slash commands starting with '/', (2) shell commands starting with '!' — EXCEPT '--' which is a My Lingo escape prefix handled before skip logic, (3) prompts under 8 chars, (4) pure code blocks, (5) URL/shell prefixes.",
         "hooks": [
           {
             "type": "command",
@@ -114,16 +114,16 @@ function main() {
 
   // ── 特殊前缀检测（必须在 shouldSkip 之前处理）──────────────────────
   //
-  // !raw 前缀：跳过优化，仅记录，直接透传原始 prompt
-  // 注意：!raw 以 '!' 开头，shouldSkip 会将所有 '!' 开头视为 shell 命令跳过，
+  // -- 前缀：跳过优化，仅记录，直接透传原始 prompt
+  // 注意：-- 以 '--' 开头，但 '--' 不触发此规则，shouldSkip 会将所有 '!' 开头视为 shell 命令跳过，
   // 所以必须在 shouldSkip 之前单独拦截。
-  if (rawPrompt.startsWith('!raw')) {
-    const prompt = rawPrompt.slice(4).trimStart()
+  if (rawPrompt.startsWith('--')) {
+    const prompt = rawPrompt.slice(2).trimStart()
     const config = loadConfig(cwd)
     if (config.execution_mode !== 'off') {
       const detection = detectLanguage(prompt || rawPrompt)
       writeTurn({ prompt: prompt || rawPrompt, detection, sessionId, mode: 'raw', fallback: false }, config)
-      emit({ systemMessage: '[my-lingo] !raw: optimization skipped.' })
+      emit({ systemMessage: '[my-lingo] --: optimization skipped.' })
     }
     return
   }
@@ -294,7 +294,7 @@ function main() {
     if (corrected.length > 0) detail.push(`${corrected.length} corrected`)
     parts.push(`${optimized.length} optimized (${detail.join(', ')})`)
   }
-  if (raws.length > 0) parts.push(`${raws.length} !raw`)
+  if (raws.length > 0) parts.push(`${raws.length} --`)
   if (fallbacks.length > 0) parts.push(`${fallbacks.length} fallbacks`)
   
   process.stderr.write(parts.join(' | ') + '\n')
@@ -366,7 +366,7 @@ function shouldSkip(prompt) {
   if (prompt.startsWith('/')) return true
   
   // 2. shell 命令前缀（! 是 Claude Code 的 shell 执行语法）
-  //    ⚠️ 注意：!raw 前缀必须在调用 shouldSkip 之前单独处理，
+  //    ⚠️ 注意：-- 前缀必须在调用 shouldSkip 之前单独处理，
   //    否则会被这里误判为 shell 命令而跳过。
   if (prompt.startsWith('!')) return true
   
@@ -391,13 +391,13 @@ function shouldSkip(prompt) {
 
 | 前缀 | 行为 | 为何在 shouldSkip 前处理 |
 |------|------|------------------------|
-| `!raw` | 跳过优化，仅记录，透传原始 prompt | `!` 开头会被 shouldSkip 当 shell 命令跳过 |
+| `--` | 跳过优化，仅记录，透传原始 prompt | `!` 开头会被 shouldSkip 当 shell 命令跳过 |
 | `::` | 强制触发 refine 模式 | `::` 不会被 shouldSkip 拦截，但需要在检测语言之前解析出文本 |
 
 调用顺序：
 ```javascript
 // main() 中的顺序（见 2.3 节）
-if (rawPrompt.startsWith('!raw')) { /* 处理 !raw，return */ }
+if (rawPrompt.startsWith('--')) { /* 处理 --，return */ }
 const isRefine = rawPrompt.startsWith('::')
-if (shouldSkip(rawPrompt)) return   // 此时 !raw 已被处理，不会误拦截
+if (shouldSkip(rawPrompt)) return   // 此时 -- 已被处理，不会误拦截
 ```

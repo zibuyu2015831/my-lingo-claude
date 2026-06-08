@@ -30,7 +30,7 @@ function main() {
       if (corrected.length) detail.push(`${corrected.length} corrected`)
       parts.push(`${optimized.length} optimized (${detail.join(', ')})`)
     }
-    if (raws.length) parts.push(`${raws.length} !raw`)
+    if (raws.length) parts.push(`${raws.length} --`)
     if (fallbacks.length) parts.push(`${fallbacks.length} fallbacks`)
 
     process.stderr.write(parts.join(' | ') + '\n')

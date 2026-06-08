@@ -49,9 +49,9 @@ DONE when ALL of the following hold:
    echo '{"prompt":"/my-lingo:status"}' | node scripts/user-prompt-submit.mjs
    echo '{"prompt":"ok"}' | node scripts/user-prompt-submit.mjs
 
-4. !raw escape works (must NOT be silently skipped as a shell command):
-   echo '{"prompt":"!raw test this please"}' | node scripts/user-prompt-submit.mjs
-   → stdout contains "systemMessage" with "!raw"
+4. -- escape works (must NOT be silently skipped as a shell command):
+   echo '{"prompt":"-- test this please"}' | node scripts/user-prompt-submit.mjs
+   → stdout contains "systemMessage" with "--"
 
 5. package.json has no "dependencies" key (zero npm packages)
 
@@ -69,7 +69,7 @@ DONE when ALL of the following hold:
    a clear message. The final commit includes this DONE checklist verification.
 
 HARD CONSTRAINTS — never violate:
-- !raw and :: prefixes handled BEFORE shouldSkip() in user-prompt-submit.mjs
+- -- and :: prefixes handled BEFORE shouldSkip() in user-prompt-submit.mjs
 - session-end.mjs does NOT read stdin (no readFileSync(0) or stdin.read())
 - recordApiSuccess() called after every successful callFastModel() result
   (BOTH the optimize path AND the :: refine path)
@@ -246,7 +246,7 @@ export function detectLanguage(text)
 export function shouldSkip(prompt)
 // 跳过条件：
 // 1. 以 '/' 开头（slash 命令）
-// 2. 以 '!' 开头（shell 命令，注意 !raw 已在上层处理）
+// 2. 以 '--' 开头，但 '--' 不触发此规则（shell 命令，注意 -- 已在上层处理）
 // 3. charCount < 8 且 wordCount < 3（过短）
 // 4. 以 ``` 开头（纯代码块）
 // 5. URL/shell 前缀：https?:, git@, ssh://, npm , pip , cargo , brew ,
@@ -255,7 +255,7 @@ export function shouldSkip(prompt)
 // 综合检测（仅供测试 / 工具使用；生产 hook 不调用它，
 // 生产流程直接用 shouldSkip + detectLanguage，见 §9.3）
 export function detectMode(prompt)
-// 注意：detectMode 内部不处理 !raw/:: — 调用方已在上层处理
+// 注意：detectMode 内部不处理 --/:: — 调用方已在上层处理
 // 返回 { mode: 'skip'|'english'|'non-english', lang, ratio, text: prompt }
 // 其中 mode 由 detectLanguage().lang 推导：'en'→'english'，'non-english'→'non-english'
 ```
@@ -536,10 +536,10 @@ function withTempData(fn) {
   ↓
 rawPrompt = input.prompt.trim()
 
-① !raw 前缀检测（BEFORE shouldSkip）
+① -- 前缀检测（BEFORE shouldSkip）
   → loadConfig；execution_mode==='off' 则 return
   → writeTurn(mode:'raw', fallback:false)（try/catch 包裹）
-  → emit systemMessage（含字面量 "!raw"），return
+  → emit systemMessage（含字面量 "--"），return
   ⚠️ emit 不得依赖 writeTurn 成功（D3）：先 writeTurn 后 emit，writeTurn 抛错也要 emit 成功。
 
 ② :: 前缀检测（BEFORE shouldSkip）
@@ -623,7 +623,7 @@ function main() {
     if (corrected.length) detail.push(`${corrected.length} corrected`)
     parts.push(`${optimized.length} optimized (${detail.join(', ')})`)
   }
-  if (raws.length) parts.push(`${raws.length} !raw`)
+  if (raws.length) parts.push(`${raws.length} --`)
   if (fallbacks.length) parts.push(`${fallbacks.length} fallbacks`)
 
   process.stderr.write(parts.join(' | ') + '\n')
@@ -685,7 +685,7 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 
 | # | 规则 | 违反的后果 |
 |---|------|-----------|
-| 1 | `!raw` 在 `shouldSkip()` 之前处理 | `!raw` 被当 shell 命令完全跳过，escape 功能失效 |
+| 1 | `--` 在 `shouldSkip()` 之前处理 | `--` 被当 shell 命令完全跳过，escape 功能失效 |
 | 2 | `session-end.mjs` 不读 stdin | 可能阻塞，SessionEnd hook 挂起 |
 | 3 | `recordApiSuccess()` 在每次成功后调用 | 2失败→成功→1失败 = 误触发熔断 |
 | 4 | 文件路径用 `path.join()`，不拼接用户输入 | 路径穿越安全漏洞 |
@@ -742,7 +742,7 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 | URL（"https://example.com"）| `shouldSkip===true` |
 | npm 命令（"npm install lodash"）| `shouldSkip===true` |
 | 纯代码块（"```js\nfoo()"）| `shouldSkip===true` |
-| `!raw test` | `shouldSkip===true`（`!` 开头）；此用例同时文档化"!raw 必须在 shouldSkip 之前拦截"的前提 |
+| `-- test` | `shouldSkip===true`（`!` 开头）；此用例同时文档化"-- 必须在 shouldSkip 之前拦截"的前提 |
 | `detectLanguage` 返回形状 | `typeof result.lang === 'string'`，`lang∈{'en','non-english'}`，`typeof result.ratio === 'number'` |
 | 空字符串 / 空白串 | 不抛错，返回合法结构 |
 
@@ -839,7 +839,7 @@ Workflow：无参数时显示当前模式；有参数时更新 config.json 中 `
 | PT-001 | API 调用成功时 `execution_prompt_en` 可正确解析 | Phase 2 |
 | PT-002 | API 连续失败 3 次触发熔断，第 4 次直接 fallback | Phase 2 |
 | PT-003 | API 恢复后 `circuit.json` 被删除、熔断重置 | Phase 2 |
-| PT-004 | `!raw` 前缀：API key 有效时仍跳过优化、仅记录 | Phase 5 |
+| PT-004 | `--` 前缀：API key 有效时仍跳过优化、仅记录 | Phase 5 |
 | PT-005 | `::` 前缀：refine 调用 API，返回精炼后的 prompt | Phase 5 |
 | PT-006 | SessionEnd hook 在真实会话结束时输出统计到 stderr | Phase 5 |
 | PT-007 | `setup.md` 完整流程：api_key 写入 config.json、权限 0o600 | Phase 3 |

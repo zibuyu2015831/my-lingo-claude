@@ -73,9 +73,9 @@ function main() {
 
   if (!rawPrompt) return
 
-  // ① !raw prefix — MUST be before shouldSkip (D: !raw starts with '!', would be skipped)
-  if (rawPrompt.startsWith('!raw')) {
-    const text = rawPrompt.slice(4).trimStart()
+  // ① -- prefix: skip optimization, pass through as-is
+  if (rawPrompt.startsWith('--')) {
+    const text = rawPrompt.slice(2).trimStart()
     const config = loadConfig(cwd)
     if (config.execution_mode === 'off') return
     try {
@@ -87,7 +87,7 @@ function main() {
         fallback: false,
       }, config)
     } catch {}
-    emit({ systemMessage: `[my-lingo] !raw: optimization skipped. Prompt: ${(text || rawPrompt).slice(0, 80)}` })
+    emit({ systemMessage: `[my-lingo] --: optimization skipped. Prompt: ${(text || rawPrompt).slice(0, 80)}` })
     return
   }
 

@@ -72,17 +72,17 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 
 | 模块 | 注意点 |
 |------|--------|
-| `user-prompt-submit.mjs` | `!raw` 和 `::` 必须在 `shouldSkip()` **之前**处理，否则 `!raw` 被误判为 shell 命令跳过 |
+| `user-prompt-submit.mjs` | `--` 和 `::` 必须在 `shouldSkip()` **之前**处理，否则 `--` 被误判为 shell 命令跳过 |
 | `session-end.mjs` | **不读 stdin**，直接从 `process.env.CLAUDE_SESSION_ID` + `readToday()` 获取数据 |
 | `api.mjs` | API 成功后调用 `recordApiSuccess()` 重置熔断计数；否则"2失败→成功→1失败"会误触发熔断 |
 | `config.mjs` | hook 脚本读 `config.json`（由 setup 写入），**不**读 userConfig——hook 是独立进程，userConfig 不自动注入 |
 | `storage.mjs` | 实现 `listTurnDates()` 和 `countTotalTurns()`，status 命令需要扫描全量历史 |
-| `detect.mjs` | `shouldSkip` 中 `!` 开头的判断要加注释，说明 `!raw` 已在上层处理 |
+| `detect.mjs` | `shouldSkip` 中 `!` 开头的判断要加注释，说明 `--` 已在上层处理 |
 
 **验收标准**：
 - 安装插件后 `/my-lingo:status` 能显示（哪怕数据为空）
 - 用户输入任意 prompt 后，`turns/YYYY-MM-DD.jsonl` 有新记录
-- `!raw` 前缀的 prompt 被记录为 `mode: "raw"`，不调用 API
+- `--` 前缀的 prompt 被记录为 `mode: "raw"`，不调用 API
 - SessionEnd 后 stderr 显示会话统计（不因读 stdin 阻塞）
 
 ---
@@ -94,7 +94,7 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 **任务**：
 1. 实现 `scripts/lib/detect.mjs`（ASCII 比率检测 + shouldSkip）
 2. 集成到 `user-prompt-submit.mjs`
-3. 添加特殊前缀处理（`::` 和 `!raw`）
+3. 添加特殊前缀处理（`::` 和 `--`）
 
 **验收标准**：
 - slash 命令不触发 hook
@@ -215,7 +215,7 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 **应对**：
 1. 调整 additionalContext 指令强度（测试不同措辞）
 2. 添加 `preview` 模式让用户验证
-3. 引导用户在必要时使用 `!raw` 前缀跳过优化，手动输入英文
+3. 引导用户在必要时使用 `--` 前缀跳过优化，手动输入英文
 
 ---
 
@@ -243,7 +243,7 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 1. 严格的 System Prompt 规则（"Do not change the user's intent" 必须放在首位）
 2. `preview` 模式让用户先看再确认
 3. `/my-lingo:last` 让用户事后核查
-4. 支持 `!raw` 前缀跳过本次优化
+4. 支持 `--` 前缀跳过本次优化
 
 ---
 

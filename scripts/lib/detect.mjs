@@ -23,7 +23,7 @@ export function shouldSkip(prompt) {
   // 1. slash commands
   if (prompt.startsWith('/')) return true
 
-  // 2. shell commands (! prefix); !raw is handled before shouldSkip by callers
+  // 2. shell commands (! prefix)
   if (prompt.startsWith('!')) return true
 
   // 3. too short

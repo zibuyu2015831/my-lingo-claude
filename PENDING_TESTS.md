@@ -56,16 +56,16 @@ Tests that cannot run in CI/`npm test` because they require external prerequisit
 
 ---
 
-## PT-004: !raw prefix — skips optimization even with valid API key
+## PT-004: -- prefix — skips optimization even with valid API key
 
 - **Phase introduced**: Phase 5
 - **Prerequisite**: `MY_LINGO_API_KEY` set and valid; My Lingo configured
 - **Repro command**:
   ```bash
   export MY_LINGO_API_KEY=sk-...
-  echo '{"prompt":"!raw test this exact phrase please"}' | node scripts/user-prompt-submit.mjs
+  echo '{"prompt":"-- test this exact phrase please"}' | node scripts/user-prompt-submit.mjs
   ```
-- **Expected result**: stdout `systemMessage` contains `[my-lingo] !raw:` and the literal text `!raw`; no API call is made; turn recorded with `mode: "raw"`; exit 0
+- **Expected result**: stdout `systemMessage` contains `[my-lingo] --:`; no API call is made; turn recorded with `mode: "raw"`; exit 0
 - **Verification status**: `[x]` **Automated** — `tests/integration/integration.test.mjs` (PT-004)
 
 ---

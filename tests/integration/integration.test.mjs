@@ -30,20 +30,20 @@ function baseConfig(overrides = {}) {
   }
 }
 
-// ── PT-004: !raw prefix skips API and records turn as "raw" ──────────────────
+// ── PT-004: -- prefix skips API and records turn as "raw" ───────────────────
 
-test('PT-004: !raw prefix — skips optimization, emits [my-lingo] !raw:', () => {
+test('PT-004: -- prefix — skips optimization, emits [my-lingo] --:', () => {
   const dataDir = makeTmpDir()
   try {
     // api_base_url points to an unreachable port — must NOT be called
     writeConfig(dataDir, baseConfig({ api_base_url: 'http://127.0.0.1:1', model_fast: 'test' }))
-    const r = runHookSync('!raw please check this code', { dataDir })
+    const r = runHookSync('-- please check this code', { dataDir })
 
     assert.equal(r.status, 0, 'hook exits 0')
     assert.ok(r.json !== null, `stdout should be valid JSON, got: ${r.stdout}`)
-    assert.ok(r.json.systemMessage?.includes('[my-lingo] !raw:'),
-      `systemMessage should contain [my-lingo] !raw:, got: ${r.json.systemMessage}`)
-    assert.ok(!r.json.additionalContext, 'no additionalContext should be emitted for !raw')
+    assert.ok(r.json.systemMessage?.includes('[my-lingo] --:'),
+      `systemMessage should contain [my-lingo] --:, got: ${r.json.systemMessage}`)
+    assert.ok(!r.json.additionalContext, 'no additionalContext should be emitted for --')
 
     // turn should be written with mode: "raw"
     const today = new Date().toISOString().slice(0, 10)
@@ -99,7 +99,7 @@ test('PT-006: session-end — outputs correct stats to stderr', () => {
       { session_id: sessionId, mode: 'english_optimized', execution_prompt: 'Do X', detected_language: 'non-english', fallback: false },
       // corrected: english, optimized, not fallback
       { session_id: sessionId, mode: 'english_optimized', execution_prompt: 'Fix Y', detected_language: 'en', fallback: false },
-      // raw: counts as !raw
+      // raw: counts as -- (skip prefix)
       { session_id: sessionId, mode: 'raw', detected_language: 'en', fallback: false },
       // different session — must NOT be counted
       { session_id: 'other-session', mode: 'english_optimized', execution_prompt: 'Z', detected_language: 'en', fallback: false },
@@ -119,8 +119,8 @@ test('PT-006: session-end — outputs correct stats to stderr', () => {
       `should count 1 translated, got: ${r.stderr}`)
     assert.ok(r.stderr.includes('1 corrected'),
       `should count 1 corrected, got: ${r.stderr}`)
-    assert.ok(r.stderr.includes('1 !raw'),
-      `should count 1 !raw, got: ${r.stderr}`)
+    assert.ok(r.stderr.includes('1 --'),
+      `should count 1 --, got: ${r.stderr}`)
   } finally {
     cleanup(dataDir)
   }

@@ -146,7 +146,7 @@ function detectLanguage(text) {
 
 特殊前缀：
 - `::` → 强制进入 refine 模式（无论 auto_correct 设置如何）
-- `!raw` → 本次强制跳过优化
+- `--` → 本次强制跳过优化
 
 ---
 
@@ -179,7 +179,7 @@ function detectLanguage(text) {
 配置按以下优先级合并（高优先级覆盖低优先级）：
 
 ```
-本次输入 inline override（如 !raw 前缀）
+本次输入 inline override（如 -- 前缀）
   > 项目级配置（.claude-my-lingo.json in cwd）
   > 当前语言空间配置（spaces.json 中对应 space）
   > 全局配置（config.json）

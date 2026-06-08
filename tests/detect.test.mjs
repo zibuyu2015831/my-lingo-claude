@@ -63,8 +63,11 @@ test('shouldSkip: code block → true', () => {
 })
 
 test('shouldSkip: ! prefix → true (shell command)', () => {
-  // !raw is intercepted by caller before shouldSkip; this confirms ! itself skips
-  assert.equal(shouldSkip('!raw test this please'), true)
+  assert.equal(shouldSkip('!ls -la'), true)
+})
+
+test('shouldSkip: -- prefix → false (handled by hook, not skipped here)', () => {
+  assert.equal(shouldSkip('-- implement this in Python'), false)
 })
 
 test('shouldSkip: normal English prompt → false', () => {

@@ -31,7 +31,7 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 - Corrects unnatural or grammatically broken English
 - Leaves pure English, code blocks, commands, and URLs untouched
 - Falls back silently if the API is unavailable (circuit breaker built in)
-- `!raw` prefix → skip optimization for this prompt
+- `--` prefix → skip optimization for this prompt
 - `::` prefix → refine mode: treat the prompt as a rough idea and polish it
 
 ### Learning commands
@@ -126,7 +126,7 @@ That's it — Claude receives the optimized English version, you see the origina
 Prefix your prompt to change behavior for that message only:
 
 ```
-!raw implement this in Python       ← send as-is, skip optimization
+-- implement this in Python         ← send as-is, skip optimization
 :: make tests less flaky            ← refine mode: treat as rough idea, polish it
 ```
 

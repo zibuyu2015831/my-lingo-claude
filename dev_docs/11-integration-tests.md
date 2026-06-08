@@ -55,11 +55,11 @@ tests/
 
 ## 4. 各用例说明
 
-### PT-004 — `!raw` 前缀跳过优化
+### PT-004 — `--` 前缀跳过优化
 
-- **场景**：prompt 以 `!raw` 开头
+- **场景**：prompt 以 `--` 开头
 - **不需要 mock server**：hook 在读取 config 后立即返回，从不调用 API
-- **验证**：`systemMessage` 含 `[my-lingo] !raw:`，无 `additionalContext`，turn 写入 `mode: "raw"`
+- **验证**：`systemMessage` 含 `[my-lingo] --:`，无 `additionalContext`，turn 写入 `mode: "raw"`
 
 ### PT-002 — 熔断器开启
 
@@ -75,7 +75,7 @@ tests/
 
 - **场景**：预写 turns JSONL，调用 `session-end.mjs`
 - **不需要 mock server**：纯文件读写
-- **验证**：stderr 包含 `[my-lingo] Session: 3 prompts | 2 optimized (1 translated, 1 corrected) | 1 !raw`，stdout 为空
+- **验证**：stderr 包含 `[my-lingo] Session: 3 prompts | 2 optimized (1 translated, 1 corrected) | 1 --`，stdout 为空
 
 ### PT-001 — API 成功路径
 

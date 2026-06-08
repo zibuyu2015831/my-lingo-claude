@@ -1,10 +1,57 @@
 # 数据存储设计
 
-版本：v0.2
+版本：v0.5
 
 ---
 
-## 1. 存储方案选型
+## 0. 当前存储方案（v0.5 起）：SQLite
+
+> ⚠️ **v0.5 起，数据存储已从 JSONL 迁移到 SQLite（`node:sqlite`）。** 本节为权威现状；
+> 下文第 1–3 节的 JSONL 目录结构与读写代码为 **v0.4 及之前的历史实现**，仅作参考保留。
+> 完整迁移设计、实测约束与边界处理见
+> [`development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md)。
+
+### 0.1 文件与分层
+
+```
+$CLAUDE_PLUGIN_DATA/my-lingo/
+├── config.json        # 全局配置（不变，仍是 JSON）
+├── spaces.json        # 语言空间配置（不变）
+├── circuit.json       # 熔断器状态（不变）
+└── data.db            # SQLite 单库（WAL 模式，伴随运行时的 data.db-wal / data.db-shm）
+```
+
+- `scripts/lib/paths.mjs` — `getDataDir()`（独立模块，避免 storage↔db 循环依赖）
+- `scripts/lib/db.mjs` — 连接单例 `getDb()`（建目录 + WAL/busy_timeout/synchronous PRAGMA +
+  `initSchema()` + chmod 0o600）、测试用 `resetDb()`、抑制 `node:sqlite` 的 ExperimentalWarning
+- `scripts/lib/storage.mjs` — 全部读写函数（对外签名与 JSONL 时代兼容），SQLite 调用全部收敛于此 + `db.mjs`
+
+### 0.2 表结构（5 张表）
+
+`turns`、`responses`、`corrections`、`learning_items`、`sessions`。建表语句见 `db.mjs` 的 `initSchema()`，
+字段说明见迁移方案文档第三节。要点：
+
+- 时间统一存 ISO-`Z` 字符串；日期范围查询用 `substr(ts,1,10)` / `substr(ts,1,7)` 切片，**不用** `datetime('now')`。
+- `turns.analyzed`（0/1）支撑 SessionEnd 幂等；`learning_items` 同时承载 SRS 状态（`next_review` / `review_count` / `interval_days`）。
+- 布尔/`undefined`/对象不能直接绑定：写入层转 `0/1` / `null` / `JSON.stringify`，读取层把整数标志位还原为布尔。
+
+### 0.3 并发与幂等
+
+- WAL + `busy_timeout=3000`：UserPromptSubmit（写 turns）、Stop（写 responses）、SessionEnd
+  （写 corrections/items/sessions + 标记 analyzed）可并发，SQLite 串行化写入，无需应用层锁。
+- SessionEnd 在**单个事务**内完成「写学习数据 + `markTurnsAnalyzed(ids)`」原子提交；耗时的网络分析调用置于事务之外。
+  崩溃重跑只处理未提交的 turns，双次运行第二次为空操作。
+
+### 0.4 数据迁移
+
+v0.5 不迁移旧 JSONL 数据（项目未发布）。`/my-lingo:purge --all` 会清空 DB 并顺带删除遗留的
+`turns/`、`responses/`、`learning/`、`sessions/` 目录。
+
+---
+
+## 1. 历史实现（v0.4 及之前）：JSONL 文件
+
+> 以下内容描述迁移前的 JSONL 方案，保留作历史参考。当前实现见上方第 0 节。
 
 ### 1.1 MVP 使用 JSONL 文件
 
@@ -15,11 +62,6 @@ MVP（v0.1）使用按日期分片的 JSONL 文件，不使用 SQLite。
 - 无需 jobs 表和 worker 进程
 - 参考实现（`claude-english-buddy`）验证了 JSONL 在同等场景的可行性
 - JSONL 文件天然支持顺序写入（hook 追加），按日期读取（命令分析）
-
-**何时迁移到 SQLite**：
-- 历史记录超过 10,000 条（JSONL 读取开始变慢）
-- 需要复杂的跨字段查询
-- 需要全文搜索
 
 ### 1.2 目录结构
 
@@ -422,14 +464,12 @@ const lines = buf.toString('utf8').split('\n').filter(Boolean)
 
 ---
 
-## 7. 迁移路径（v1.0 SQLite）
+## 7. 迁移路径（已于 v0.5 完成）
 
-当需要迁移到 SQLite 时，执行以下步骤：
+迁移到 SQLite 已在 v0.5 实施完成，详见第 0 节与
+[`development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md)。
 
-1. 设计 SQLite schema（参考现有 JSONL 字段结构）
-2. 编写迁移脚本：`scripts/migrate-jsonl-to-sqlite.mjs`
-3. 批量读取所有 JSONL 文件，写入 SQLite
-4. 保留 JSONL 文件作为备份（不删除）
-5. 更新 `storage.mjs` 读写逻辑
-
-迁移脚本设计为幂等：可多次运行，重复记录通过 `ts` + `session_id` 去重。
+**实际决策与原计划的差异**：
+- **不做数据迁移**：项目未发布、无既有用户数据，直接切换；未编写 `migrate-jsonl-to-sqlite.mjs`。
+  若未来需要，迁移时应将导入的 turns 全部置 `analyzed=1`，避免被 SessionEnd 重新分析。
+- `storage.mjs` 读写逻辑已替换为 SQL，对外函数签名保持兼容（仅 `updateLearningItemReview` 改为按 `id` 匹配）。

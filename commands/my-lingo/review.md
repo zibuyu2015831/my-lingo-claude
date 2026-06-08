@@ -34,13 +34,12 @@ console.log('After each answer, I\'ll give you feedback and update your progress
 const output = {
   space: spaceKey,
   items: dueItems.map(item => ({
-    ts: item.ts,
+    id: item.id,
     type: item.type,
     target_text: item.target_text,
     native_explanation: item.native_explanation,
     review_count: item.review_count || 0,
     next_review: item.next_review,
-    month: (item.ts || '').slice(0, 7),
   }))
 }
 console.log('REVIEW_DATA:' + JSON.stringify(output))
@@ -67,13 +66,12 @@ Look at the REVIEW_DATA output above. For each item in the list:
 node --input-type=module << 'EOF'
 import { updateLearningItemReview } from './scripts/lib/storage.mjs'
 
-// Replace these with actual values from the current item being reviewed
-const SPACE = 'REPLACE_WITH_SPACE'
-const MONTH_KEY = 'REPLACE_WITH_MONTH'
-const ITEM_TS = 'REPLACE_WITH_TS'
-const NEW_REVIEW_COUNT = 0 // REPLACE_WITH_NEW_COUNT
+// Replace these with actual values from the current item being reviewed.
+// ITEM_ID comes from the `id` field in REVIEW_DATA.
+const ITEM_ID = 0          // REPLACE_WITH_ITEM_ID
+const NEW_REVIEW_COUNT = 0 // REPLACE_WITH_NEW_COUNT (current review_count + 1 if recalled correctly)
 
-updateLearningItemReview(SPACE, MONTH_KEY, ITEM_TS, NEW_REVIEW_COUNT)
+updateLearningItemReview(ITEM_ID, NEW_REVIEW_COUNT)
 console.log('Review state updated.')
 EOF
 ```

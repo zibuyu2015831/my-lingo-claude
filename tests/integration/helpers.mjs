@@ -2,10 +2,35 @@ import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // Project root, two levels up from tests/integration/
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+
+const STORAGE_URL = pathToFileURL(path.join(ROOT, 'scripts/lib/storage.mjs')).href
+
+// Call a named export of storage.mjs in a fresh child process (so this test
+// process never holds a SQLite connection / module singleton). Returns the
+// parsed JSON result. Used for both seeding (writeX) and reading (readX).
+export function dbCall(dataDir, exportName, args = []) {
+  const script = `
+const mod = await import(process.env.STORAGE_URL)
+const out = mod[process.env.CALL_NAME](...JSON.parse(process.env.CALL_ARGS))
+process.stdout.write(JSON.stringify(out ?? null))
+`
+  const res = spawnSync('node', ['--input-type=module', '--eval', script], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_DATA: dataDir,
+      STORAGE_URL,
+      CALL_NAME: exportName,
+      CALL_ARGS: JSON.stringify(args),
+    },
+  })
+  if (res.status !== 0) throw new Error(`dbCall ${exportName} failed: ${res.stderr}`)
+  try { return JSON.parse(res.stdout.trim() || 'null') } catch { return null }
+}
 
 export function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'my-lingo-test-'))
@@ -39,22 +64,29 @@ export function readCircuitJson(dataDir) {
   } catch { return null }
 }
 
-// Write CLAUDE_PLUGIN_DATA/my-lingo/turns/DATE.jsonl for PT-006
-export function writeTurnsFile(dataDir, date, records) {
-  const dir = path.join(dataDir, 'my-lingo', 'turns')
-  fs.mkdirSync(dir, { recursive: true })
-  const lines = records.map(r => JSON.stringify(r)).join('\n') + '\n'
-  fs.writeFileSync(path.join(dir, `${date}.jsonl`), lines)
+// Seed turns into the SQLite DB. Records use snake_case columns (as the old
+// JSONL fixtures did); mapped to writeTurn's camelCase input here.
+export function seedTurns(dataDir, records) {
+  const script = `
+const { writeTurn } = await import(process.env.STORAGE_URL)
+for (const r of JSON.parse(process.env.SEED_JSON)) {
+  writeTurn({
+    ts: r.ts, sessionId: r.session_id, mode: r.mode,
+    executionPrompt: r.execution_prompt, prompt: r.original_prompt,
+    detectedLanguage: r.detected_language, fallback: r.fallback,
+    rewriteType: r.rewrite_type, latencyMs: r.latency_ms,
+  }, { language_space: r.language_space ?? 'english', cwd: r.cwd ?? '/tmp' })
+}
+`
+  const res = spawnSync('node', ['--input-type=module', '--eval', script], {
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, STORAGE_URL, SEED_JSON: JSON.stringify(records) },
+  })
+  if (res.status !== 0) throw new Error(`seedTurns failed: ${res.stderr}`)
 }
 
 export function readTurnsForDate(dataDir, date) {
-  try {
-    const file = path.join(dataDir, 'my-lingo', 'turns', `${date}.jsonl`)
-    return fs.readFileSync(file, 'utf8')
-      .trim().split('\n').filter(Boolean)
-      .map(l => { try { return JSON.parse(l) } catch { return null } })
-      .filter(Boolean)
-  } catch { return [] }
+  return dbCall(dataDir, 'readTurnsForDay', [date]) || []
 }
 
 function parseJson(raw) {
@@ -148,10 +180,11 @@ export function runSessionEndAsync({ dataDir, sessionId = 'test-session', timeou
   })
 }
 
-// Write a corrections JSONL file for pre-populating test data (PT-010 setup)
-export function writeCorrectionsFile(dataDir, space, month, records) {
-  const dir = path.join(dataDir, 'my-lingo', 'learning', space)
-  fs.mkdirSync(dir, { recursive: true })
-  const lines = records.map(r => JSON.stringify(r)).join('\n') + '\n'
-  fs.writeFileSync(path.join(dir, `corrections-${month}.jsonl`), lines)
+// Seed corrections / learning items into the DB for pre-populating test data.
+export function seedCorrections(dataDir, space, records) {
+  for (const r of records) dbCall(dataDir, 'writeCorrection', [r, space])
+}
+
+export function seedItems(dataDir, space, records) {
+  for (const r of records) dbCall(dataDir, 'writeLearningItem', [r, space])
 }

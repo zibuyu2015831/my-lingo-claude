@@ -13,7 +13,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import {
   makeTmpDir, cleanup,
   writeConfig, writeCircuitJson, circuitJsonExists, readCircuitJson,
-  writeTurnsFile, readTurnsForDate,
+  seedTurns, readTurnsForDate, seedCorrections, seedItems, dbCall,
   runHookSync, runHookAsync, runSessionEnd, runSessionEndAsync,
   ROOT,
 } from './helpers.mjs'
@@ -48,7 +48,7 @@ test('PT-004: -- prefix — skips optimization, emits [my-lingo] --:', () => {
     // turn should be written with mode: "raw"
     const today = new Date().toISOString().slice(0, 10)
     const turns = readTurnsForDate(dataDir, today)
-    assert.ok(turns.length > 0, 'a turn should be written to JSONL')
+    assert.ok(turns.length > 0, 'a turn should be written to the DB')
     const last = turns[turns.length - 1]
     assert.equal(last.mode, 'raw', 'turn mode should be "raw"')
   } finally {
@@ -95,7 +95,7 @@ test('PT-006: session-end — outputs correct stats to stderr', () => {
     const today = new Date().toISOString().slice(0, 10)
     const sessionId = 'test-session-006'
 
-    writeTurnsFile(dataDir, today, [
+    seedTurns(dataDir, [
       // translated: non-english, optimized, not fallback
       { session_id: sessionId, mode: 'english_optimized', execution_prompt: 'Do X', detected_language: 'non-english', fallback: false },
       // corrected: english, optimized, not fallback
@@ -255,7 +255,7 @@ test('PT-009: session-end analysis — writes corrections and sessions JSONL', a
       timeout_seconds: 5,
     })
 
-    writeTurnsFile(dataDir, today, [
+    seedTurns(dataDir, [
       {
         session_id: sessionId,
         mode: 'english_optimized',
@@ -279,14 +279,11 @@ test('PT-009: session-end analysis — writes corrections and sessions JSONL', a
     assert.equal(r.status, 0, `session-end should exit 0, got ${r.status}, stderr: ${r.stderr}`)
 
     const currentMonth = today.slice(0, 7)
-    const correctionsFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `corrections-${currentMonth}.jsonl`)
-    assert.ok(fs.existsSync(correctionsFile), `corrections file should exist: ${correctionsFile}`)
+    const corrections = dbCall(dataDir, 'readCorrections', ['english', [currentMonth]])
+    assert.ok(corrections.length >= 1, `should have at least 1 correction, got: ${corrections.length}`)
 
-    const corrLines = fs.readFileSync(correctionsFile, 'utf8').trim().split('\n').filter(Boolean)
-    assert.ok(corrLines.length >= 1, `should have at least 1 correction, got: ${corrLines.length}`)
-
-    const sessionsFile = path.join(dataDir, 'my-lingo', 'sessions', `${today}.jsonl`)
-    assert.ok(fs.existsSync(sessionsFile), `sessions file should exist: ${sessionsFile}`)
+    const sessionRow = dbCall(dataDir, 'readSession', [sessionId])
+    assert.ok(sessionRow, `session row should exist for ${sessionId}`)
   } finally {
     cleanup(dataDir)
     await stopServer(server)
@@ -308,7 +305,7 @@ test('PT-010: session-end — raw-only turns skip analysis, no corrections file'
       timeout_seconds: 1,
     })
 
-    writeTurnsFile(dataDir, today, [
+    seedTurns(dataDir, [
       { session_id: sessionId, mode: 'raw', detected_language: 'en', fallback: false },
       { session_id: sessionId, mode: 'raw', detected_language: 'en', fallback: false },
     ])
@@ -318,8 +315,8 @@ test('PT-010: session-end — raw-only turns skip analysis, no corrections file'
     assert.equal(r.status, 0, 'session-end should exit 0')
 
     const currentMonth = today.slice(0, 7)
-    const correctionsFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `corrections-${currentMonth}.jsonl`)
-    assert.ok(!fs.existsSync(correctionsFile), 'corrections file should NOT exist for raw-only session')
+    const corrections = dbCall(dataDir, 'readCorrections', ['english', [currentMonth]])
+    assert.equal(corrections.length, 0, 'no corrections should exist for raw-only session')
   } finally {
     cleanup(dataDir)
   }
@@ -335,16 +332,12 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
     const today = new Date().toISOString().slice(0, 10)
     const currentMonth = today.slice(0, 7)
 
-    // Pre-write some corrections so generate-lesson has data to work with
-    const corrDir = path.join(dataDir, 'my-lingo', 'learning', 'english')
-    fs.mkdirSync(corrDir, { recursive: true })
-    const corrFile = path.join(corrDir, `corrections-${currentMonth}.jsonl`)
-    const corrections = [
+    // Pre-seed some corrections so generate-lesson has data to work with
+    seedCorrections(dataDir, 'english', [
       { ts: new Date().toISOString(), type: 'grammar', original: 'this have bug', corrected: 'this has a bug', explanation: 'test', pattern: 'subject-verb' },
       { ts: new Date().toISOString(), type: 'grammar', original: 'need fix', corrected: 'need to fix', explanation: 'test2', pattern: 'infinitive' },
       { ts: new Date().toISOString(), type: 'grammar', original: 'have problem', corrected: 'has a problem', explanation: 'test3', pattern: 'subject-verb' },
-    ]
-    fs.writeFileSync(corrFile, corrections.map(c => JSON.stringify(c)).join('\n') + '\n')
+    ])
 
     writeConfig(dataDir, {
       execution_mode: 'english_optimized',
@@ -389,36 +382,16 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
 test('PT-012: readItemsDue — correctly filters due items, null sorts first', () => {
   const dataDir = makeTmpDir()
   try {
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const itemsDir = path.join(dataDir, 'my-lingo', 'learning', 'english')
-    fs.mkdirSync(itemsDir, { recursive: true })
-
     const pastDate = new Date(Date.now() - 2 * 86400000).toISOString()
     const futureDate = new Date(Date.now() + 7 * 86400000).toISOString()
 
-    const itemA = { ts: 'ts-a', type: 'phrase', target_text: 'item A (past)', native_explanation: 'past due', review_count: 1, next_review: pastDate }
-    const itemB = { ts: 'ts-b', type: 'phrase', target_text: 'item B (null)', native_explanation: 'never reviewed', review_count: 0, next_review: null }
-    const itemC = { ts: 'ts-c', type: 'phrase', target_text: 'item C (future)', native_explanation: 'not yet due', review_count: 1, next_review: futureDate }
+    seedItems(dataDir, 'english', [
+      { ts: 'ts-a', type: 'phrase', target_text: 'item A (past)', native_explanation: 'past due', review_count: 1, next_review: pastDate },
+      { ts: 'ts-b', type: 'phrase', target_text: 'item B (null)', native_explanation: 'never reviewed', review_count: 0, next_review: null },
+      { ts: 'ts-c', type: 'phrase', target_text: 'item C (future)', native_explanation: 'not yet due', review_count: 1, next_review: futureDate },
+    ])
 
-    const itemsFile = path.join(itemsDir, `items-${currentMonth}.jsonl`)
-    fs.writeFileSync(itemsFile, [itemA, itemB, itemC].map(i => JSON.stringify(i)).join('\n') + '\n')
-
-    // Import and call readItemsDue
-    // Use inline Node process to avoid env contamination
-    const result = spawnSync('node', ['--input-type=module'], {
-      input: `
-import { readItemsDue } from './scripts/lib/storage.mjs'
-process.env.CLAUDE_PLUGIN_DATA = ${JSON.stringify(dataDir)}
-const due = readItemsDue('english')
-console.log(JSON.stringify(due))
-`,
-      encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
-      cwd: ROOT,
-    })
-
-    assert.equal(result.status, 0, `readItemsDue process failed: ${result.stderr}`)
-    const due = JSON.parse(result.stdout.trim())
+    const due = dbCall(dataDir, 'readItemsDue', ['english'])
 
     const dueTss = due.map(i => i.ts)
     assert.ok(dueTss.includes('ts-a'), 'item A (past) should be due')

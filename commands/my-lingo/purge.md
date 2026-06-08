@@ -23,35 +23,23 @@ Parse `$ARGUMENTS`:
 ALL_FLAG=""      # set to "--all" if --all was in $ARGUMENTS
 KEEP_CONFIG=""   # set to "--keep-config" if --keep-config was in $ARGUMENTS
 
-node -e "
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data');
-const dataDir = path.join(base, 'my-lingo');
+node --input-type=module --eval "
+import { loadSpaces } from './scripts/lib/config.mjs';
 const allFlag = process.argv[1] === '--all';
 const keepConfig = process.argv[2] === '--keep-config';
 
 let activeSpace = 'english';
-try {
-  const s = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8'));
-  if (s.active) activeSpace = s.active;
-} catch {}
+try { const s = loadSpaces(); if (s.active) activeSpace = s.active; } catch {}
 
 console.log('[my-lingo] Purge — data to be deleted:');
 console.log('');
 if (allFlag) {
-  console.log('  learning/ (ALL spaces)');
-  console.log('  turns/ (all turn records)');
-  if (!keepConfig) {
-    console.log('  sessions/ (all session records)');
-  }
+  console.log('  ALL learning data (corrections + items, every space)');
+  console.log('  ALL turn records');
+  console.log('  ALL Claude response records');
+  if (!keepConfig) console.log('  ALL session summaries');
 } else {
-  console.log('  learning/' + activeSpace + '/ (corrections and learning items)');
-}
-if (!keepConfig) {
-  // Config and spaces.json preserved by default unless --all without --keep-config
-  // (in default mode, config is always preserved)
+  console.log('  learning data for space \"' + activeSpace + '\" (corrections + items)');
 }
 console.log('');
 console.log('Config and spaces configuration will be preserved.');
@@ -71,58 +59,34 @@ Ask the user to type **"yes"** to confirm. If the user types anything other than
 ALL_FLAG=""
 KEEP_CONFIG=""
 
-node -e "
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data');
-const dataDir = path.join(base, 'my-lingo');
+node --input-type=module --eval "
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadSpaces } from './scripts/lib/config.mjs';
+import { getDataDir } from './scripts/lib/paths.mjs';
+import { purgeSpace, purgeAll } from './scripts/lib/storage.mjs';
+
 const allFlag = process.argv[1] === '--all';
 const keepConfig = process.argv[2] === '--keep-config';
 
 let activeSpace = 'english';
-try {
-  const s = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8'));
-  if (s.active) activeSpace = s.active;
-} catch {}
+try { const s = loadSpaces(); if (s.active) activeSpace = s.active; } catch {}
 
-let deleted = [];
-
+const deleted = [];
 if (allFlag) {
-  // Delete all learning data
-  const learningDir = path.join(dataDir, 'learning');
-  if (fs.existsSync(learningDir)) {
-    fs.rmSync(learningDir, { recursive: true, force: true });
-    deleted.push('learning/ (all spaces)');
-  }
-  // Delete turns
-  const turnsDir = path.join(dataDir, 'turns');
-  if (fs.existsSync(turnsDir)) {
-    fs.rmSync(turnsDir, { recursive: true, force: true });
-    deleted.push('turns/');
-  }
-  // Delete sessions unless --keep-config
-  if (!keepConfig) {
-    const sessionsDir = path.join(dataDir, 'sessions');
-    if (fs.existsSync(sessionsDir)) {
-      fs.rmSync(sessionsDir, { recursive: true, force: true });
-      deleted.push('sessions/');
-    }
+  purgeAll({ keepSessions: keepConfig });
+  deleted.push('all turns, responses, corrections, items' + (keepConfig ? '' : ', sessions'));
+  // Best-effort: remove any leftover legacy JSONL directories from pre-v0.5.
+  const dataDir = getDataDir();
+  for (const d of ['turns', 'responses', 'learning', 'sessions']) {
+    try { fs.rmSync(path.join(dataDir, d), { recursive: true, force: true }); } catch {}
   }
 } else {
-  // Delete active space learning data only
-  const spaceDir = path.join(dataDir, 'learning', activeSpace);
-  if (fs.existsSync(spaceDir)) {
-    fs.rmSync(spaceDir, { recursive: true, force: true });
-    deleted.push('learning/' + activeSpace + '/');
-  }
+  purgeSpace(activeSpace);
+  deleted.push('learning data for space \"' + activeSpace + '\"');
 }
 
-if (deleted.length === 0) {
-  console.log('[my-lingo] Nothing to delete — directories did not exist.');
-} else {
-  console.log('[my-lingo] Deleted: ' + deleted.join(', '));
-  console.log('Data cleared. Config and spaces configuration preserved.');
-}
+console.log('[my-lingo] Deleted: ' + deleted.join(', '));
+console.log('Data cleared. Config and spaces configuration preserved.');
 " "$ALL_FLAG" "$KEEP_CONFIG"
 ```

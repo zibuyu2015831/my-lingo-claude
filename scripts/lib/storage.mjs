@@ -1,45 +1,44 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
-import { computeNextReview, getItemsDue } from './srs.mjs'
+import { getDb } from './db.mjs'
+import { computeNextReview, computeIntervalDays } from './srs.mjs'
 
-const FALLBACK_DIR = path.join(os.homedir(), '.claude', 'plugins', 'data')
+// getDataDir is owned by paths.mjs (to avoid a storage<->db circular import),
+// but re-exported here so existing callers `import { getDataDir } from './storage.mjs'`.
+export { getDataDir } from './paths.mjs'
 
-// NOTE: read env at call-time (not module load) for test isolation (D6)
-export function getDataDir() {
-  const base = process.env.CLAUDE_PLUGIN_DATA || FALLBACK_DIR
-  return path.join(base, 'my-lingo')
+// ── value coercion (node:sqlite cannot bind booleans, undefined, or objects) ──
+const b = (v) => (v ? 1 : 0)                       // boolean -> 0/1
+const n = (v) => (v === undefined ? null : v)      // undefined -> null (string/number/null passthrough)
+
+// Integer flag columns read back as 0/1; restore boolean semantics for callers/tests.
+function normalizeTurn(row) {
+  if (!row) return row
+  return { ...row, fallback: row.fallback === 1, analyzed: row.analyzed === 1 }
 }
 
-function ensureDir(dir, mode = 0o700) {
-  fs.mkdirSync(dir, { recursive: true, mode })
-}
+// ── turns ────────────────────────────────────────────────────────────────────
 
 export function writeTurn(input, config) {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const turnsDir = path.join(getDataDir(), 'turns')
-    ensureDir(turnsDir)
-    const file = path.join(turnsDir, `${today}.jsonl`)
-
-    // Map camelCase input to canonical snake_case schema
-    const record = {
-      ts: new Date().toISOString(),
-      session_id: input.sessionId ?? null,
-      cwd: config.cwd ?? input.cwd ?? process.cwd(),
-      language_space: config.language_space ?? 'english',
-      mode: input.mode ?? null,
-      detected_language: input.detectedLanguage
-        ?? (input.detection?.lang ?? 'en'),
-      original_prompt: input.prompt ?? null,
-      execution_prompt: input.executionPrompt ?? null,
-      rewrite_type: input.rewriteType ?? null,
-      latency_ms: input.latencyMs ?? null,
-      fallback: Boolean(input.fallback),
-      fallback_reason: input.fallbackReason ?? null,
-    }
-
-    fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf8')
+    getDb().prepare(`
+      INSERT INTO turns
+        (ts, session_id, cwd, language_space, mode, detected_language,
+         original_prompt, execution_prompt, rewrite_type, latency_ms,
+         fallback, fallback_reason, analyzed)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)
+    `).run(
+      n(input.ts) ?? new Date().toISOString(),
+      n(input.sessionId),
+      n(config.cwd ?? input.cwd ?? process.cwd()),
+      config.language_space ?? 'english',
+      n(input.mode),
+      input.detectedLanguage ?? (input.detection?.lang ?? 'en'),
+      n(input.prompt),
+      n(input.executionPrompt),
+      n(input.rewriteType),
+      n(input.latencyMs),
+      b(input.fallback),
+      n(input.fallbackReason),
+    )
   } catch {
     // write failure must not propagate (D3)
   }
@@ -47,43 +46,40 @@ export function writeTurn(input, config) {
 
 export function readTurnsForDay(date) {
   try {
-    const file = path.join(getDataDir(), 'turns', `${date}.jsonl`)
-    if (!fs.existsSync(file)) return []
-    return fs.readFileSync(file, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map(line => { try { return JSON.parse(line) } catch { return null } })
-      .filter(Boolean)
+    return getDb().prepare(
+      'SELECT * FROM turns WHERE substr(ts,1,10)=? ORDER BY id'
+    ).all(date).map(normalizeTurn)
   } catch {
     return []
   }
 }
 
 export function readTurnsForRange(startDate, endDate) {
-  const records = []
-  const start = new Date(startDate)
-  const end = new Date(endDate)
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    records.push(...readTurnsForDay(d.toISOString().slice(0, 10)))
+  try {
+    return getDb().prepare(
+      'SELECT * FROM turns WHERE substr(ts,1,10) BETWEEN ? AND ? ORDER BY id'
+    ).all(startDate, endDate).map(normalizeTurn)
+  } catch {
+    return []
   }
-  return records
 }
 
 export function readTurnsLastNDays(n) {
-  const end = new Date()
-  const start = new Date()
-  start.setDate(start.getDate() - (n - 1))
-  return readTurnsForRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10))
+  try {
+    const cutoff = new Date(Date.now() - (n - 1) * 86400000).toISOString().slice(0, 10)
+    return getDb().prepare(
+      'SELECT * FROM turns WHERE substr(ts,1,10) >= ? ORDER BY id'
+    ).all(cutoff).map(normalizeTurn)
+  } catch {
+    return []
+  }
 }
 
 export function listTurnDates() {
   try {
-    const dir = path.join(getDataDir(), 'turns')
-    if (!fs.existsSync(dir)) return []
-    return fs.readdirSync(dir)
-      .filter(f => f.endsWith('.jsonl'))
-      .map(f => f.replace('.jsonl', ''))
-      .sort()
+    return getDb().prepare(
+      'SELECT DISTINCT substr(ts,1,10) AS d FROM turns ORDER BY d'
+    ).all().map(r => r.d)
   } catch {
     return []
   }
@@ -91,89 +87,123 @@ export function listTurnDates() {
 
 export function countTotalTurns() {
   try {
-    return listTurnDates().reduce((sum, date) => sum + readTurnsForDay(date).length, 0)
+    return getDb().prepare('SELECT COUNT(*) AS n FROM turns').get().n
   } catch {
     return 0
   }
 }
 
-// v0.2+ stubs — conform to schema but not wired into v0.1 hot path (D7)
+export function readRecentTurns(count) {
+  if (count <= 0) return []
+  try {
+    return getDb().prepare(
+      'SELECT * FROM turns ORDER BY id DESC LIMIT ?'
+    ).all(count).map(normalizeTurn)
+  } catch {
+    return []
+  }
+}
+
+// SessionEnd idempotency: only turns not yet folded into a committed analysis.
+export function readUnanalyzedTurns(sessionId) {
+  try {
+    const sql = sessionId
+      ? 'SELECT * FROM turns WHERE session_id=? AND analyzed=0 ORDER BY id'
+      : 'SELECT * FROM turns WHERE analyzed=0 ORDER BY id'
+    const stmt = getDb().prepare(sql)
+    const rows = sessionId ? stmt.all(sessionId) : stmt.all()
+    return rows.map(normalizeTurn)
+  } catch {
+    return []
+  }
+}
+
+// Mark by explicit id list (the rows actually read), not by session_id — avoids
+// missing null sessions and mis-marking turns written after the read.
+export function markTurnsAnalyzed(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return
+  try {
+    const placeholders = ids.map(() => '?').join(',')
+    getDb().prepare(
+      `UPDATE turns SET analyzed=1 WHERE id IN (${placeholders})`
+    ).run(...ids)
+  } catch {}
+}
+
+// ── corrections ────────────────────────────────────────────────────────────
+
 export function writeCorrection(record, space) {
   try {
-    const month = new Date().toISOString().slice(0, 7)
-    const dir = path.join(getDataDir(), 'learning', space)
-    ensureDir(dir)
-    const file = path.join(dir, `corrections-${month}.jsonl`)
-    const line = JSON.stringify({ ...record, ts: record.ts || new Date().toISOString() })
-    fs.appendFileSync(file, line + '\n', 'utf8')
-  } catch {}
-}
-
-export function writeLearningItem(record, space) {
-  try {
-    const month = new Date().toISOString().slice(0, 7)
-    const dir = path.join(getDataDir(), 'learning', space)
-    ensureDir(dir)
-    const file = path.join(dir, `items-${month}.jsonl`)
-    const line = JSON.stringify({ ...record, ts: record.ts || new Date().toISOString() })
-    fs.appendFileSync(file, line + '\n', 'utf8')
-  } catch {}
-}
-
-export function writeSession(record) {
-  try {
-    const today = new Date().toISOString().slice(0, 10)
-    const sessionsDir = path.join(getDataDir(), 'sessions')
-    ensureDir(sessionsDir)
-    const file = path.join(sessionsDir, `${today}.jsonl`)
-    const line = JSON.stringify({ ...record, ts: new Date().toISOString() })
-    fs.appendFileSync(file, line + '\n', 'utf8')
+    getDb().prepare(`
+      INSERT INTO corrections
+        (ts, session_id, turn_id, language_space, type, original, corrected, explanation, pattern)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(
+      record.ts || new Date().toISOString(),
+      n(record.session_id),
+      n(record.turn_id ?? record.turn_ref),  // tolerate legacy 'turn_ref' field name
+      space,
+      n(record.type),
+      n(record.original),
+      n(record.corrected),
+      n(record.explanation),
+      n(record.pattern),
+    )
   } catch {}
 }
 
 export function readCorrections(space, monthKeys) {
   if (!monthKeys || monthKeys.length === 0) return []
-  const results = []
-  for (const month of monthKeys) {
-    try {
-      const file = path.join(getDataDir(), 'learning', space, `corrections-${month}.jsonl`)
-      if (!fs.existsSync(file)) continue
-      const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-      for (const line of lines) {
-        try { results.push(JSON.parse(line)) } catch {}
-      }
-    } catch {}
+  try {
+    const placeholders = monthKeys.map(() => '?').join(',')
+    return getDb().prepare(
+      `SELECT * FROM corrections WHERE language_space=? AND substr(ts,1,7) IN (${placeholders}) ORDER BY id`
+    ).all(space, ...monthKeys)
+  } catch {
+    return []
   }
-  return results
-}
-
-export function readLearningItems(space, monthKeys) {
-  if (!monthKeys || monthKeys.length === 0) return []
-  const results = []
-  for (const month of monthKeys) {
-    try {
-      const file = path.join(getDataDir(), 'learning', space, `items-${month}.jsonl`)
-      if (!fs.existsSync(file)) continue
-      const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-      for (const line of lines) {
-        try { results.push(JSON.parse(line)) } catch {}
-      }
-    } catch {}
-  }
-  return results
 }
 
 export function listCorrectionMonths(space) {
   try {
-    const dir = path.join(getDataDir(), 'learning', space)
-    if (!fs.existsSync(dir)) return []
-    const files = fs.readdirSync(dir)
-    const months = []
-    for (const file of files) {
-      const m = file.match(/^corrections-(\d{4}-\d{2})\.jsonl$/)
-      if (m) months.push(m[1])
-    }
-    return months.sort()
+    return getDb().prepare(
+      'SELECT DISTINCT substr(ts,1,7) AS m FROM corrections WHERE language_space=? ORDER BY m'
+    ).all(space).map(r => r.m)
+  } catch {
+    return []
+  }
+}
+
+// ── learning items (also hold SRS state) ──────────────────────────────────────
+
+export function writeLearningItem(record, space) {
+  try {
+    getDb().prepare(`
+      INSERT INTO learning_items
+        (ts, session_id, language_space, type, target_text, native_explanation,
+         next_review, review_count, interval_days)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(
+      record.ts || new Date().toISOString(),
+      n(record.session_id),
+      space,
+      n(record.type),
+      n(record.target_text),
+      n(record.native_explanation),
+      n(record.next_review),                 // null = never reviewed (due immediately)
+      record.review_count ?? 0,
+      record.interval_days ?? 1,
+    )
+  } catch {}
+}
+
+export function readLearningItems(space, monthKeys) {
+  if (!monthKeys || monthKeys.length === 0) return []
+  try {
+    const placeholders = monthKeys.map(() => '?').join(',')
+    return getDb().prepare(
+      `SELECT * FROM learning_items WHERE language_space=? AND substr(ts,1,7) IN (${placeholders}) ORDER BY id`
+    ).all(space, ...monthKeys)
   } catch {
     return []
   }
@@ -181,102 +211,120 @@ export function listCorrectionMonths(space) {
 
 export function listItemMonths(space) {
   try {
-    const dir = path.join(getDataDir(), 'learning', space)
-    if (!fs.existsSync(dir)) return []
-    const files = fs.readdirSync(dir)
-    const months = []
-    for (const file of files) {
-      const m = file.match(/^items-(\d{4}-\d{2})\.jsonl$/)
-      if (m) months.push(m[1])
-    }
-    return months.sort()
+    return getDb().prepare(
+      'SELECT DISTINCT substr(ts,1,7) AS m FROM learning_items WHERE language_space=? ORDER BY m'
+    ).all(space).map(r => r.m)
   } catch {
     return []
   }
 }
 
-export function updateLearningItemReview(space, monthKey, itemTs, reviewCount) {
+// SRS update — by primary key (ts could collide within the same millisecond).
+export function updateLearningItemReview(id, reviewCount) {
   try {
-    const file = path.join(getDataDir(), 'learning', space, `items-${monthKey}.jsonl`)
-    if (!fs.existsSync(file)) return
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-    const updated = lines.map(line => {
-      try {
-        const item = JSON.parse(line)
-        if (item.ts !== itemTs) return line
-        item.review_count = reviewCount
-        item.next_review = computeNextReview(reviewCount).toISOString()
-        return JSON.stringify(item)
-      } catch {
-        return line
-      }
-    })
-    fs.writeFileSync(file, updated.join('\n') + '\n', 'utf8')
+    const nextReview = computeNextReview(reviewCount).toISOString()
+    const interval = computeIntervalDays(reviewCount)
+    getDb().prepare(
+      'UPDATE learning_items SET review_count=?, next_review=?, interval_days=? WHERE id=?'
+    ).run(reviewCount, nextReview, interval, id)
   } catch {}
 }
 
 export function readItemsDue(space) {
   try {
-    const months = listItemMonths(space)
-    const allItems = []
-    for (const month of months) {
-      const file = path.join(getDataDir(), 'learning', space, `items-${month}.jsonl`)
-      try {
-        const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-        for (const line of lines) {
-          try { allItems.push(JSON.parse(line)) } catch {}
-        }
-      } catch {}
-    }
-    return getItemsDue(allItems, Date.now())
+    const nowIso = new Date().toISOString()
+    // NULL next_review = never reviewed -> due now, and sorted first (NULL ranks
+    // before any timestamp). Matches srs.getItemsDue() ordering.
+    return getDb().prepare(`
+      SELECT * FROM learning_items
+      WHERE language_space=? AND (next_review IS NULL OR next_review <= ?)
+      ORDER BY (next_review IS NOT NULL), next_review ASC
+    `).all(space, nowIso)
   } catch {
     return []
   }
 }
 
-export function writeResponseRecord(record) {
+// ── sessions ─────────────────────────────────────────────────────────────────
+
+export function writeSession(record) {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const dir = path.join(getDataDir(), 'responses')
-    ensureDir(dir)
-    const file = path.join(dir, `${today}.jsonl`)
-    const line = JSON.stringify({ ...record, ts: record.ts || new Date().toISOString() })
-    fs.appendFileSync(file, line + '\n', { encoding: 'utf8', mode: 0o600 })
+    getDb().prepare(`
+      INSERT OR REPLACE INTO sessions
+        (ts, session_id, language_space, total_prompts, optimized, translated,
+         corrected, fallbacks, raws, top_errors)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      new Date().toISOString(),
+      n(record.session_id),
+      n(record.language_space),
+      n(record.total_prompts),
+      n(record.optimized),
+      n(record.translated),
+      n(record.corrected),
+      n(record.fallbacks),
+      n(record.raws),
+      JSON.stringify(record.top_errors ?? []),
+    )
   } catch {}
 }
 
+export function readSession(sessionId) {
+  try {
+    const row = getDb().prepare('SELECT * FROM sessions WHERE session_id=?').get(sessionId)
+    if (!row) return null
+    let top_errors = []
+    try { top_errors = JSON.parse(row.top_errors) } catch {}
+    return { ...row, top_errors }
+  } catch {
+    return null
+  }
+}
+
+// ── responses (Claude replies, Stop hook) ─────────────────────────────────────
+
+export function writeResponseRecord(record) {
+  try {
+    getDb().prepare(
+      'INSERT INTO responses (ts, session_id, text, word_count) VALUES (?,?,?,?)'
+    ).run(
+      record.ts || new Date().toISOString(),
+      n(record.session_id),
+      n(record.text),
+      n(record.word_count),
+    )
+  } catch {}
+}
+
+// `date` kept for signature compatibility but ignored — querying by session_id
+// alone is correct across midnight boundaries.
 export function readResponsesForSession(sessionId, date) {
   try {
-    const file = path.join(getDataDir(), 'responses', `${date}.jsonl`)
-    if (!fs.existsSync(file)) return []
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
-    const results = []
-    for (const line of lines) {
-      try {
-        const r = JSON.parse(line)
-        if (!sessionId || r.session_id === sessionId) results.push(r)
-      } catch {}
-    }
-    return results
+    return getDb().prepare(
+      'SELECT * FROM responses WHERE session_id=? ORDER BY id'
+    ).all(sessionId)
   } catch {
     return []
   }
 }
 
-export function readRecentTurns(n) {
-  if (n <= 0) return []
+// ── purge (used by /my-lingo:purge) ───────────────────────────────────────────
+
+export function purgeSpace(space) {
   try {
-    const dates = listTurnDates().slice().reverse()
-    const result = []
-    for (const date of dates) {
-      const turns = readTurnsForDay(date).slice().reverse()
-      for (const turn of turns) {
-        result.push(turn)
-        if (result.length >= n) return result
-      }
-    }
-    return result
-  } catch {
-    return []
-  }
+    const db = getDb()
+    db.prepare('DELETE FROM corrections WHERE language_space=?').run(space)
+    db.prepare('DELETE FROM learning_items WHERE language_space=?').run(space)
+  } catch {}
+}
+
+export function purgeAll({ keepSessions = false } = {}) {
+  try {
+    const db = getDb()
+    db.exec('DELETE FROM turns')
+    db.exec('DELETE FROM responses')
+    db.exec('DELETE FROM corrections')
+    db.exec('DELETE FROM learning_items')
+    if (!keepSessions) db.exec('DELETE FROM sessions')
+  } catch {}
 }

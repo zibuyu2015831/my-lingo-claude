@@ -13,6 +13,7 @@ import {
 import { redact } from './lib/privacy.mjs'
 import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from './lib/prompts.mjs'
 import { debugLog } from './lib/debug.mjs'
+import { writeInstallPointer } from './lib/paths.mjs'
 
 function readStdin() {
   try {
@@ -66,6 +67,10 @@ function buildSystemMessage(result, detection, latencyMs) {
 }
 
 function main() {
+  // Refresh the install pointer so env-blind slash commands can locate the
+  // plugin root + data dir (dev_docs/14 §六-F). Atomic + skip-if-unchanged.
+  writeInstallPointer()
+
   const input = readStdin()
   const rawPrompt = (input.prompt || '').trim()
   const cwd = input.cwd || process.cwd()

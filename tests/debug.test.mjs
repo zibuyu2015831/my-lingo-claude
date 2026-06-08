@@ -84,7 +84,7 @@ test('debugLog: does not create file when both env and config.debug unset', () =
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', undefined, () => {
       debugLog('TEST', { msg: 'should not appear' }, { debug: false })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       assert.equal(fs.existsSync(file), false, 'debug.log must not be created when disabled')
     })
   })
@@ -94,7 +94,7 @@ test('debugLog: creates debug.log when MY_LINGO_DEBUG=1', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
       debugLog('TEST', { msg: 'hello' })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       assert.ok(fs.existsSync(file), 'debug.log should be created')
     })
   })
@@ -104,7 +104,7 @@ test('debugLog: creates debug.log when config.debug=true (env unset)', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', undefined, () => {
       debugLog('TEST', { msg: 'from config' }, { debug: true })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       assert.ok(fs.existsSync(file), 'debug.log should be created via config.debug')
     })
   })
@@ -116,7 +116,7 @@ test('debugLog: line format is [ISO] [EVENT] JSON', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
       debugLog('API_REQUEST', { model: 'gpt-4o-mini', url: 'https://api.example.com' })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const content = fs.readFileSync(file, 'utf8').trim()
       // Format: [ISO timestamp] [EVENT] {...}
       assert.match(content, /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[API_REQUEST\] \{/)
@@ -128,7 +128,7 @@ test('debugLog: written line is valid JSON after the event prefix', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
       debugLog('CONFIG', { execution_mode: 'english_optimized', debug: true })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const line = fs.readFileSync(file, 'utf8').trim()
       const jsonPart = line.replace(/^\[.*?\] \[.*?\] /, '')
       assert.doesNotThrow(() => JSON.parse(jsonPart), 'JSON portion should be parseable')
@@ -144,7 +144,7 @@ test('debugLog: multiple calls accumulate lines', () => {
       debugLog('SKIP', { preview: 'ls -la' })
       debugLog('CONFIG', { execution_mode: 'off' })
       debugLog('CIRCUIT', { event: 'failure', failure_count: 1 })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
       assert.equal(lines.length, 3)
     })
@@ -157,7 +157,7 @@ test('debugLog: redacts API key strings before writing', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
       debugLog('API_REQUEST', { prompt: 'use sk-abc1234567890abcdef1234567890 for this' })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const content = fs.readFileSync(file, 'utf8')
       assert.ok(!content.includes('sk-abc'), 'API key must not appear in debug.log')
       assert.ok(content.includes('[API_KEY]'), 'redacted placeholder should appear')
@@ -174,7 +174,7 @@ test('debugLog: redacts nested string fields in objects', () => {
           { role: 'user', content: 'My token=supersecret here' },
         ],
       })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const content = fs.readFileSync(file, 'utf8')
       assert.ok(!content.includes('supersecret'), 'secret must be redacted from nested content')
       assert.ok(content.includes('[REDACTED]'), 'redacted placeholder should appear')
@@ -186,7 +186,7 @@ test('debugLog: api_key=[SET] placeholder is not further redacted', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
       debugLog('CONFIG', { api_key: '[SET]', execution_mode: 'english_optimized' })
-      const file = path.join(dir, 'my-lingo', 'debug.log')
+      const file = path.join(dir, 'debug.log')
       const content = fs.readFileSync(file, 'utf8')
       assert.ok(content.includes('[SET]'), '[SET] placeholder should pass through intact')
     })
@@ -198,7 +198,7 @@ test('debugLog: api_key=[SET] placeholder is not further redacted', () => {
 test('debugLog: does not throw when data dir is read-only', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
-      const mlDir = path.join(dir, 'my-lingo')
+      const mlDir = dir
       fs.mkdirSync(mlDir, { recursive: true })
       fs.chmodSync(mlDir, 0o444)
       try {
@@ -215,7 +215,7 @@ test('debugLog: does not throw when data dir is read-only', () => {
 test('debugLog: rotates when file exceeds 1MB, keeps last 500 lines', () => {
   withTempData((dir) => {
     withEnv('MY_LINGO_DEBUG', '1', () => {
-      const mlDir = path.join(dir, 'my-lingo')
+      const mlDir = dir
       fs.mkdirSync(mlDir, { recursive: true, mode: 0o700 })
       const file = path.join(mlDir, 'debug.log')
 

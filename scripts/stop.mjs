@@ -7,6 +7,7 @@ import os from 'node:os'
 import process from 'node:process'
 import { writeResponseRecord } from './lib/storage.mjs'
 import { debugLog } from './lib/debug.mjs'
+import { writeInstallPointer } from './lib/paths.mjs'
 
 // Derive Claude Code transcript path from cwd + sessionId.
 // Formula confirmed experimentally: replace all / and _ with -
@@ -53,6 +54,8 @@ export function extractLastResponse(chunk, sessionId) {
 
 function main() {
   try {
+    writeInstallPointer() // refresh the env-blind command pointer (dev_docs/14 §六-F)
+
     const sessionId = process.env.CLAUDE_SESSION_ID
     if (!sessionId) return
 

@@ -43,7 +43,7 @@ test('loadSpaces: reads existing spaces.json correctly', () => {
         japanese: { key: 'japanese', display_name: 'Japanese', target_language: 'ja' },
       },
     }
-    const dir2 = path.join(dir, 'my-lingo')
+    const dir2 = dir
     fs.mkdirSync(dir2, { recursive: true })
     fs.writeFileSync(path.join(dir2, 'spaces.json'), JSON.stringify(data))
     const loaded = loadSpaces()
@@ -96,7 +96,7 @@ test('addSpace: adds space with specified target_language', () => {
 test('addSpace: writes spaces.json with mode 0o600', () => {
   withTempData((dir) => {
     addSpace('japanese', { target_language: 'ja' })
-    const spacesPath = path.join(dir, 'my-lingo', 'spaces.json')
+    const spacesPath = path.join(dir, 'spaces.json')
     const stat = fs.statSync(spacesPath)
     assert.equal(stat.mode & 0o777, 0o600)
   })

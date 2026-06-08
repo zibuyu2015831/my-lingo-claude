@@ -12,7 +12,10 @@ Start a spaced repetition review session for items that are due today.
 
 ```bash
 node --input-type=module << 'EOF'
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
 const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs')
 const { readItemsDue } = await import(ROOT + '/scripts/lib/storage.mjs')
 
@@ -65,7 +68,10 @@ Look at the REVIEW_DATA output above. For each item in the list:
 
 ```bash
 node --input-type=module << 'EOF'
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
 const { updateLearningItemReview } = await import(ROOT + '/scripts/lib/storage.mjs')
 
 // Replace these with actual values from the current item being reviewed.

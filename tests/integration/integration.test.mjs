@@ -15,9 +15,10 @@ import {
   writeConfig, writeCircuitJson, circuitJsonExists, readCircuitJson,
   seedTurns, readTurnsForDate, seedCorrections, seedItems, dbCall,
   runHookSync, runHookAsync, runSessionEnd, runSessionEndAsync,
-  runCommandBlock,
+  runCommandBlock, runCommandBlockEnvBlind, writeInstallPointerAt,
   ROOT,
 } from './helpers.mjs'
+import os from 'node:os'
 
 // Minimal config shared across sync tests (no real API involved).
 function baseConfig(overrides = {}) {
@@ -375,7 +376,7 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
     assert.equal(result.status, 0, `generate-lesson should exit 0, stderr: ${result.stderr}`)
     assert.ok(result.stdout.includes('# My Lingo Lesson'), `stdout should contain lesson heading, got: ${result.stdout.slice(0, 200)}`)
 
-    const lessonFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `lessons-${today}.md`)
+    const lessonFile = path.join(dataDir, 'learning', 'english', `lessons-${today}.md`)
     assert.ok(fs.existsSync(lessonFile), `lesson file should exist: ${lessonFile}`)
     const fileContent = fs.readFileSync(lessonFile, 'utf8')
     assert.ok(fileContent.includes('# My Lingo Lesson'), 'lesson file should contain heading')
@@ -428,7 +429,7 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
     const sessionId = 'test-session-013'
     writeConfig(dataDir, { execution_mode: 'english_optimized', native_language: 'zh-CN' })
     fs.writeFileSync(
-      path.join(dataDir, 'my-lingo', 'spaces.json'),
+      path.join(dataDir, 'spaces.json'),
       JSON.stringify({ active: 'english', spaces: { english: {} } }),
     )
 
@@ -472,5 +473,74 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
     }
   } finally {
     cleanup(dataDir)
+  }
+})
+
+// ── PT-015: env-blind production form — commands resolve via the install pointer ─
+// The REAL production form: a user runs the slash command from their own project,
+// so the command's bash subprocess sees NEITHER CLAUDE_PLUGIN_ROOT NOR
+// CLAUDE_PLUGIN_DATA. The hook has written install.json; commands must read it to
+// locate both the plugin root (to import modules) and the data dir (to read data).
+// The old harness always injected both env vars and so could never catch the
+// silent-fallback bug this guards against. dev_docs/14 §六-F / §10.5.6.
+
+test('PT-015: data commands resolve via install.json pointer with NO plugin env vars', () => {
+  const dataDir = makeTmpDir()
+  const home = makeTmpDir()
+  try {
+    const sessionId = 'test-session-015'
+    // Seed straight into dataDir (getDataDir() == CLAUDE_PLUGIN_DATA == dataDir here).
+    seedTurns(dataDir, [
+      { session_id: sessionId, mode: 'english_optimized', detected_language: 'en',
+        original_prompt: 'helo wrld', execution_prompt: 'Hello world', rewrite_type: 'correction', fallback: false },
+    ])
+    seedItems(dataDir, 'english', [
+      { ts: new Date().toISOString(), session_id: sessionId, type: 'phrase',
+        target_text: 'kick off', native_explanation: '开始' },
+    ])
+    // The hook would have written this pointer; commands must rely on it alone.
+    writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir })
+
+    const cases = [
+      ['status', 'Total turns:  1'],
+      ['recent', 'helo wrld'],
+      ['last', 'Hello world'],
+      ['vocab', 'kick off'],
+      ['space', 'english'],
+    ]
+    for (const [name, needle] of cases) {
+      const r = runCommandBlockEnvBlind(name, { home })
+      assert.equal(r.status, 0, `/${name} should exit 0 env-blind via pointer, stderr: ${r.stderr}`)
+      assert.ok(
+        r.stdout.includes(needle),
+        `/${name} env-blind output should contain "${needle}". Got:\n${r.stdout}\n${r.stderr}`,
+      )
+    }
+  } finally {
+    cleanup(dataDir)
+    cleanup(home)
+  }
+})
+
+// ── PT-016: no pointer + no env → loud, actionable failure (NOT a silent "0") ──
+// Before the fix, an unresolved data dir fell back to a phantom directory and
+// commands cheerfully printed "0 turns". The whole point of the rewrite is that
+// this now fails loudly. dev_docs/14 §10.2 ③ / §10.5.6.
+
+test('PT-016: a read command with a resolvable plugin but no data dir fails loudly, not silently', () => {
+  const home = makeTmpDir()
+  try {
+    // Pointer can locate the plugin (so modules import) but carries NO data_dir,
+    // mimicking "hook never recorded the real data dir". getDataDir() must throw
+    // a clear error instead of silently falling back to a phantom "0 turns" dir.
+    writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir: undefined })
+    const r = runCommandBlockEnvBlind('status', { home })
+    assert.notEqual(r.status, 0, `/status should fail (non-zero) when the data dir is unresolvable. stdout:\n${r.stdout}`)
+    assert.ok(
+      /data dir unresolved/.test(r.stderr) || /data dir unresolved/.test(r.stdout),
+      `error should explain how to recover. stdout:\n${r.stdout}\nstderr:\n${r.stderr}`,
+    )
+  } finally {
+    cleanup(home)
   }
 })

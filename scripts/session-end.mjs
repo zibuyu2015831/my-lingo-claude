@@ -12,9 +12,12 @@ import { getDb } from './lib/db.mjs'
 import { loadConfig, loadSpaces, getActiveSpace } from './lib/config.mjs'
 import { buildAnalysisMessages, callDeepModel } from './lib/analysis.mjs'
 import { debugLog } from './lib/debug.mjs'
+import { writeInstallPointer } from './lib/paths.mjs'
 
 function main() {
   try {
+    writeInstallPointer() // refresh the env-blind command pointer (dev_docs/14 §六-F)
+
     const sessionId = process.env.CLAUDE_SESSION_ID || null
     const today = new Date().toISOString().slice(0, 10)
 

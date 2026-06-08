@@ -20,7 +20,10 @@ Parse `$ARGUMENTS` — take the first integer, clamp to 1–50, default to 5 if 
 N_VALUE=5
 
 node --input-type=module --eval "
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
 const { readRecentTurns } = await import(ROOT + '/scripts/lib/storage.mjs');
 const n = parseInt(process.argv[1]) || 5;
 

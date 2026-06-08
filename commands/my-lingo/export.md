@@ -15,7 +15,10 @@ Export all learning materials for the selected language space as Markdown to std
 node --input-type=module << 'EOF'
 import fs from 'node:fs'
 import path from 'node:path'
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+import os from 'node:os'
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd()
 const { loadConfig, loadSpaces, getActiveSpace } = await import(ROOT + '/scripts/lib/config.mjs')
 const {
   listCorrectionMonths, readCorrections,

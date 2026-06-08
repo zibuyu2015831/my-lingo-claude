@@ -1,6 +1,8 @@
 # Data Dir Split — Hook 与 Slash Command 写读不同目录的排查记录
 
-> **状态**：✅ **架构已定稿、全部决策已确认（见 §十，含 §10.6 确认状态）**。根因经 live 实测 + 代码 grep + Claude Code 官方文档三重确认。结论：转正规 `/plugin install`（方案 C）+ 指针文件（方案 F，命令唯一可靠的定位手段）+ **数据清零不迁移**（项目未发布、测试数据在另一台设备）+ `setup` 不写盘（§10.4-A）。**本轮仅定稿文档，代码实施按 §10.5 顺序留待后续单独开工。**
+> **状态**：✅ **已实施落地（2026-06-08，见 §十一 实施日志）**。代码已按 §10.5 全部完成：`paths.mjs` 指针回退链 + 去嵌套 + 抛错、三个 hook 写指针、16 个命令统一引导片段、`setup` 不写盘、`mode/use` 收敛 + 原子写、测试补强（243 全绿，含 PT-015 env-blind / PT-016 抛错）。本机数据已清零（tarball 备份）。**唯一剩余的人工步骤**：用户运行 `/plugin install`（§10.5.2，交互式，见 §十一）。
+>
+> **原始定稿（保留）**：架构经 live 实测 + 代码 grep + Claude Code 官方文档三重确认。结论：转正规 `/plugin install`（方案 C）+ 指针文件（方案 F，命令唯一可靠的定位手段）+ **数据清零不迁移**（项目未发布、测试数据在另一台设备）+ `setup` 不写盘（§10.4-A）。
 >
 > **关键定论（官方文档背书）**：slash command 的 bash 子进程**无论何种安装形态都拿不到 `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` 环境变量**（这是 Claude Code 的执行通道决定的，与"软链 vs marketplace"无关）。因此**方案 C 解决不了命令的数据访问问题**，指针文件（F）在正规安装下**依然是结构性必需**。且 per-plugin 数据目录路径**不是官方稳定契约**（marketplace 大概率 `…/data/<name>/`，但属内部实现细节），故**不能硬编码路径**，必须由"知情的 hook"写指针。
 > **发现日期**：2026-06-08（2026-06-08 基于代码 + 运行环境复核并修订）
@@ -626,3 +628,48 @@ export function getDataDir() {
 1. ✅ **数据清零**：已确认直接清零。**测试数据在另一台设备**，本机数据非真实数据 → 本机无备份/迁移负担，正规安装后真机从空库自然重来。
 2. ✅ **`setup` 走 10.4-A**：已确认 `setup` 不再写盘、退化为"校验 env + 指引"，不再负责初始化 `spaces.json`。
 3. ✅ **本轮范围**：仅定稿文档，**暂不写代码**。代码实施按 §10.5 顺序留待后续单独开工。
+   → **已于 2026-06-08 实施完毕，见 §十一。**
+
+---
+
+## 十一、实施日志（2026-06-08 落地）
+
+按 §10.5 顺序全部完成。改动清单与验证如下。
+
+### 11.1 代码改动
+
+| # | 文件 | 改动 |
+|---|------|------|
+| 1 | `scripts/lib/paths.mjs` | 重写 `getDataDir()` 为「① `CLAUDE_PLUGIN_DATA` 直返（**不再** `join('my-lingo')`，去双层嵌套）→ ② 读 `install.json.data_dir` → ③ 抛 `data dir unresolved` 错误（删除静默假目录回退）」。新增 `writeInstallPointer()`：`plugin_root` 由 `import.meta.url` 推导（B11），`data_dir` 取 `CLAUDE_PLUGIN_DATA`，原子写（tmp+rename）+ 内容未变跳过（B12）+ 无 `updated_at`（稳定 diff）+ 仅在 env 存在时写（绝不写猜测值）。指针路径 `pointerFile()` 按调用时读 `homedir()`（测试可重定向 `$HOME`，D6）。**Plan D 探测已删除。** |
+| 2 | `scripts/{user-prompt-submit,stop,session-end}.mjs` | 各自 `main()` 开头调用 `writeInstallPointer()`。 |
+| 3 | 16 个 `commands/my-lingo/*.md` | 全部换成统一引导片段：`ROOT = env.CLAUDE_PLUGIN_ROOT \|\| install.json.plugin_root \|\| cwd`，再 `import` 模块。`mode`/`use`/`setup` 从内联 `node -e`(CJS) 收敛为 ESM 走 `paths.mjs`/`config.mjs`；`mode` 写 `config.json` 改原子写（B7）；`use` 改走 `config.mjs::setActiveSpace`（已原子）；`setup` **不再写盘**、删除 `spaces.json` heredoc 初始化（§10.4-A，顺带解决 B6）；`lesson` 在 bash 层从指针解析 `ROOT`。 |
+| 4 | `.claude-plugin/marketplace.json` | 新增本地 marketplace（`source: "./"`），供 `/plugin install`。 |
+
+### 11.2 测试
+
+- 全套 **243 全绿**（229 unit + 14 integration）。
+- 新增 `tests/paths.test.mjs`（7 例）：env 直返不再嵌套、指针解析、无指针抛错、损坏指针抛错、`writeInstallPointer` 写/跳过/原子/env-blind 不写。
+- 新增 **PT-015**（env-blind：无 `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DATA` + 陌生 cwd + 指针 → 命中真目录，覆盖 B1 生产形态）与 **PT-016**（可定位插件但无 `data_dir` → 抛清晰错误，不再静默 0）。
+- 测试 helper 修复：spawn hook 的 helper 设 `HOME=dataDir`，避免 `writeInstallPointer` 污染真实 `~/.claude/...`（发现并修复了由测试触发的真目录指针污染）。
+
+### 11.3 端到端实测（沙盒 `$HOME`）
+
+1. hook（`CLAUDE_PLUGIN_DATA` 已设）→ 正确写 `install.json`（`plugin_root` 准确、`data_dir` 无 `-skills-dir`/无嵌套），数据落 `$DATA/data.db`。
+2. `mode` 命令 **env-blind 经指针**写 `config.json`（`off`）。
+3. hook 再次运行读回 **同一目录** 的 `execution_mode=off` —— **写/读目录分裂的根因症状消除**。
+4. 16 个命令 env-blind 经指针全部无语法/解析错误。
+
+### 11.4 本机数据清零
+
+`~/.claude/plugins/data/my-lingo{,-skills-dir}` 已 tarball 备份至 `/tmp/my-lingo-data-backup-*.tar.gz` 后删除。软链 `~/.claude/skills/my-lingo` **保留**（用户切到 `/plugin install` 前仍需它；下次 prompt 时 hook 会按新逻辑重建干净数据 + 指针）。
+
+### 11.5 剩余人工步骤（仅用户可执行）
+
+`/plugin install` 是交互式命令，无法由代码代办。建议：
+
+```
+/plugin marketplace add /data/zibuyu/my_lingo_claude
+/plugin install my-lingo@my-lingo-local
+```
+
+安装后**实测一次**（§10.5.2）：确认 `CLAUDE_PLUGIN_DATA` 形如 `~/.claude/plugins/data/my-lingo/`（无 `-skills-dir` 后缀），与 §10.3-① 去嵌套假设一致（官方文档已背书，见本轮 claude-code-guide 核实）。确认后可 `rm ~/.claude/skills/my-lingo` 卸载软链。

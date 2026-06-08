@@ -26,14 +26,14 @@ If the user provided an argument, map it to the canonical value. If no argument,
 ### Step 2: Show current mode (no argument)
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-const dataDir = process.env.CLAUDE_PLUGIN_DATA
-  ? path.join(process.env.CLAUDE_PLUGIN_DATA, 'my-lingo')
-  : path.join(require('os').homedir(), '.claude', 'plugins', 'data', 'my-lingo');
+node --input-type=module --eval "
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
+const { getDataDir } = await import(ROOT + '/scripts/lib/paths.mjs');
 let cfg = {};
-try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')); } catch {}
+try { cfg = JSON.parse(fs.readFileSync(path.join(getDataDir(), 'config.json'), 'utf8')); } catch {}
 console.log('[my-lingo] Current mode: ' + (cfg.execution_mode || 'english_optimized (default)'));
 console.log('');
 console.log('Available modes:');
@@ -55,12 +55,12 @@ Map the user's input to a canonical mode, then write it:
 
 NEW_MODE="english_optimized"  # set from user argument
 
-node -e "
-const fs = require('fs');
-const path = require('path');
-const dataDir = process.env.CLAUDE_PLUGIN_DATA
-  ? path.join(process.env.CLAUDE_PLUGIN_DATA, 'my-lingo')
-  : path.join(require('os').homedir(), '.claude', 'plugins', 'data', 'my-lingo');
+node --input-type=module --eval "
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
+const { getDataDir } = await import(ROOT + '/scripts/lib/paths.mjs');
 
 const ALIASES = {
   english: 'english_optimized',
@@ -80,12 +80,15 @@ if (!canonical) {
   process.exit(1);
 }
 
+const dataDir = getDataDir();
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')); } catch {}
 cfg.execution_mode = canonical;
 
-fs.mkdirSync(dataDir, { recursive: true });
-fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(cfg, null, 2), { mode: 0o600 });
+fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+const tmp = path.join(dataDir, 'config.json.tmp');
+fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+fs.renameSync(tmp, path.join(dataDir, 'config.json'));
 console.log('[my-lingo] Mode switched to: ' + canonical);
 " "$NEW_MODE"
 ```

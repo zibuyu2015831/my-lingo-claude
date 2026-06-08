@@ -62,11 +62,12 @@ test('PT-002: circuit breaker — first failure gives "API unavailable", second 
   const dataDir = makeTmpDir()
   try {
     // Port 1 causes immediate connection refused — no waiting for timeout
-    writeConfig(dataDir, baseConfig({ api_base_url: 'http://127.0.0.1:1', model_fast: 'test' }))
+    writeConfig(dataDir, baseConfig())
     const prompt = '请帮我检查这段代码有没有问题'
+    const credEnv = { MY_LINGO_API_BASE_URL: 'http://127.0.0.1:1', MY_LINGO_MODEL_FAST: 'test' }
 
     // Attempt 1: circuit closed → API fails → "API unavailable"
-    const r1 = runHookSync(prompt, { dataDir })
+    const r1 = runHookSync(prompt, { dataDir, env: credEnv })
     assert.equal(r1.status, 0, 'attempt 1 exits 0')
     assert.ok(r1.json?.systemMessage?.includes('API unavailable'),
       `attempt 1 should say "API unavailable", got: ${r1.json?.systemMessage}`)
@@ -77,7 +78,7 @@ test('PT-002: circuit breaker — first failure gives "API unavailable", second 
     assert.equal(c.failure_count, 1)
 
     // Attempt 2: circuit open (recent failure) → "Circuit breaker open"
-    const r2 = runHookSync(prompt, { dataDir })
+    const r2 = runHookSync(prompt, { dataDir, env: credEnv })
     assert.equal(r2.status, 0, 'attempt 2 exits 0')
     assert.ok(r2.json?.systemMessage?.includes('Circuit breaker open'),
       `attempt 2 should say "Circuit breaker open", got: ${r2.json?.systemMessage}`)
@@ -136,8 +137,8 @@ test('PT-001: API success — additionalContext contains CANONICAL REQUEST + exe
   }))
   const dataDir = makeTmpDir()
   try {
-    writeConfig(dataDir, baseConfig({ api_base_url: `http://127.0.0.1:${port}`, model_fast: 'test' }))
-    const r = await runHookAsync('检查这个代码有没有架构问题', { dataDir })
+    writeConfig(dataDir, baseConfig())
+    const r = await runHookAsync('检查这个代码有没有架构问题', { dataDir, env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test' } })
 
     assert.equal(r.status, 0, 'hook exits 0')
     assert.ok(r.json !== null, `stdout should be valid JSON, got: ${r.stdout}`)
@@ -166,11 +167,11 @@ test('PT-003: circuit breaker reset — circuit.json gone after cooldown expires
     // Write circuit.json with a very old timestamp so cooldown is already expired.
     // checkCircuitBreaker() auto-deletes it and returns false → API call proceeds.
     writeCircuitJson(dataDir, { failure_count: 3, last_failure_at: 1000 })
-    writeConfig(dataDir, baseConfig({ api_base_url: `http://127.0.0.1:${port}`, model_fast: 'test' }))
+    writeConfig(dataDir, baseConfig())
 
     assert.ok(circuitJsonExists(dataDir), 'circuit.json should exist before hook runs')
 
-    const r = await runHookAsync('请帮我检查这段代码有没有问题', { dataDir })
+    const r = await runHookAsync('请帮我检查这段代码有没有问题', { dataDir, env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test' } })
     assert.equal(r.status, 0, 'hook exits 0')
     assert.ok(!circuitJsonExists(dataDir), 'circuit.json should be gone after successful API call')
     assert.ok(r.json?.additionalContext?.includes('Check this code for issues'),
@@ -190,8 +191,8 @@ test('PT-005: :: prefix — refine path injects refinement notice into additiona
   }))
   const dataDir = makeTmpDir()
   try {
-    writeConfig(dataDir, baseConfig({ api_base_url: `http://127.0.0.1:${port}`, model_fast: 'test' }))
-    const r = await runHookAsync(':: make tests not slow', { dataDir })
+    writeConfig(dataDir, baseConfig())
+    const r = await runHookAsync(':: make tests not slow', { dataDir, env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test' } })
 
     assert.equal(r.status, 0, 'hook exits 0')
     assert.ok(r.json !== null, `stdout should be valid JSON, got: ${r.stdout}`)
@@ -213,8 +214,8 @@ test('PT-008: auth error — "[my-lingo] Authentication failed" in systemMessage
   const { server, port } = await startMockServer(makeAuthErrorHandler())
   const dataDir = makeTmpDir()
   try {
-    writeConfig(dataDir, baseConfig({ api_base_url: `http://127.0.0.1:${port}`, model_fast: 'test' }))
-    const r = await runHookAsync('请帮我检查这段代码有没有问题', { dataDir })
+    writeConfig(dataDir, baseConfig())
+    const r = await runHookAsync('请帮我检查这段代码有没有问题', { dataDir, env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test' } })
 
     assert.equal(r.status, 0, 'hook exits 0')
     assert.ok(r.json !== null, `stdout should be valid JSON, got: ${r.stdout}`)
@@ -250,8 +251,6 @@ test('PT-009: session-end analysis — writes corrections and sessions JSONL', a
 
     writeConfig(dataDir, {
       execution_mode: 'english_optimized',
-      api_base_url: `http://127.0.0.1:${port}`,
-      model_fast: 'test-model',
       native_language: 'zh-CN',
       timeout_seconds: 5,
     })
@@ -275,7 +274,7 @@ test('PT-009: session-end analysis — writes corrections and sessions JSONL', a
       },
     ])
 
-    const r = await runSessionEndAsync({ dataDir, sessionId, timeout: 10000 })
+    const r = await runSessionEndAsync({ dataDir, sessionId, timeout: 10000, env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test-model' } })
 
     assert.equal(r.status, 0, `session-end should exit 0, got ${r.status}, stderr: ${r.stderr}`)
 
@@ -349,9 +348,6 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
 
     writeConfig(dataDir, {
       execution_mode: 'english_optimized',
-      api_base_url: `http://127.0.0.1:${port}`,
-      model_fast: 'test-model',
-      model_deep: 'test-model',
       native_language: 'zh-CN',
       timeout_seconds: 10,
     })
@@ -362,6 +358,9 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
           ...process.env,
           CLAUDE_PLUGIN_DATA: dataDir,
           MY_LINGO_API_KEY: 'sk-test',
+          MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`,
+          MY_LINGO_MODEL_FAST: 'test-model',
+          MY_LINGO_MODEL_DEEP: 'test-model',
         },
         cwd: ROOT,
       })

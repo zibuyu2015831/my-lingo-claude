@@ -11,7 +11,7 @@
 | 命令 | 阶段 | 功能 |
 |------|------|------|
 | `/my-lingo:setup` | MVP | 首次运行向导，配置 API 和默认语言空间 |
-| `/my-lingo:status` | MVP | 显示当前配置和今日统计 |
+| `/my-lingo:info` | MVP | 显示当前配置和今日统计 |
 | `/my-lingo:last` | MVP | 显示上一次的原始输入和执行 Prompt |
 | `/my-lingo:mode [mode]` | MVP | 查看/切换执行模式 |
 | `/my-lingo:space` | v0.2 | 查看当前语言空间详情 |
@@ -51,7 +51,7 @@
 
 ---
 
-### `/my-lingo:status`
+### `/my-lingo:info`
 
 查看当前状态。
 

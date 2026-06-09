@@ -1,5 +1,5 @@
 ---
-name: status
+name: info
 description: Show current My Lingo status, configuration, and today's stats.
 allowed-tools: Bash, Read, Glob
 ---

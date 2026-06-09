@@ -137,7 +137,7 @@ console.log('  Space:     english  (default)');
 console.log('');
 console.log('Send any message to Claude to activate the plugin (the hook records');
 console.log('your first turn and writes the install pointer). After that:');
-console.log('  • /my-lingo:status  — verify configuration and stats');
+console.log('  • /my-lingo:info  — verify configuration and stats');
 console.log('  • /my-lingo:mode    — change execution mode (persists)');
 console.log('  • /my-lingo:use     — switch language space (persists)');
 "

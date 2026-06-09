@@ -35,7 +35,7 @@ my-lingo-claude/
 ├── commands/
 │   └── my-lingo/
 │       ├── setup.md             # /my-lingo:setup
-│       ├── status.md            # /my-lingo:status
+│       ├── status.md            # /my-lingo:info
 │       ├── last.md              # /my-lingo:last
 │       ├── mode.md              # /my-lingo:mode
 │       ├── use.md               # /my-lingo:use（切换语言空间）
@@ -249,7 +249,7 @@ Claude 会话结束
 3. 同步 Prompt 优化（调用外部 API，超时 8s，fallback）
 4. JSONL 存储（turns 按日期分片写入）
 5. `additionalContext` + `systemMessage` 注入（结构化指令）
-6. `/my-lingo:status`（配置和今日统计）
+6. `/my-lingo:info`（配置和今日统计）
 7. `/my-lingo:last`（上一次 original → execution_prompt）
 8. `/my-lingo:mode`（切换执行模式）
 9. SessionEnd 钩子（会话统计输出 stderr）

@@ -58,12 +58,14 @@ function buildAdditionalContext(result, detection, config) {
   return execPrompt + summaryCtx
 }
 
-function buildSystemMessage(result, detection, latencyMs) {
+function buildSystemMessage(result, detection, latencyMs, config) {
   const effectiveLang = result.detected_input_language || detection.lang
   const langLabel = effectiveLang === 'en' ? 'refined' : `${effectiveLang}→en`
   const execPrompt = result.execution_prompt_en
-  const truncated = execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt
-  return `[my-lingo] ${langLabel} (${latencyMs}ms): ${truncated}`
+  const display = config?.display_mode === 'full'
+    ? execPrompt
+    : (execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt)
+  return `[my-lingo] ${langLabel} (${latencyMs}ms): ${display}`
 }
 
 function main() {
@@ -182,7 +184,10 @@ function main() {
       }, config)
     } catch {}
     const ctx = `IMPORTANT: The user used :: to request prompt refinement. Their refined intent is: ${result.execution_prompt_en}. Follow this refined prompt as the user's actual request.`
-    emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${(result.execution_prompt_en || '').slice(0, 150)}` })
+    const refinedDisplay = config?.display_mode === 'full'
+      ? result.execution_prompt_en || ''
+      : (result.execution_prompt_en || '').slice(0, 150)
+    emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${refinedDisplay}` })
     return
   }
 
@@ -256,7 +261,7 @@ function main() {
   } catch {}
 
   const additionalContext = buildAdditionalContext(result, detection, config)
-  const systemMessage = buildSystemMessage(result, detection, latencyMs)
+  const systemMessage = buildSystemMessage(result, detection, latencyMs, config)
   debugLog('EMIT', {
     has_additional_context: Boolean(additionalContext),
     system_message: systemMessage,

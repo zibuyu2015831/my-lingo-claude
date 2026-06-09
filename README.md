@@ -207,7 +207,7 @@ This is useful when you want immersive practice: your prompts are optimized to E
 ## Privacy
 
 - Prompts are **redacted** before being sent to the external API: API keys, passwords, private IPs, connection string credentials, and username-based paths are stripped.
-- Your **raw prompts are stored locally** in JSONL files (never sent to any third party other than your chosen API).
+- Your **raw prompts are stored locally** in a SQLite database (never sent to any third party other than your chosen API).
 - `config.json` (containing your API key) is written with permission `0600` and is `.gitignore`d.
 
 ---

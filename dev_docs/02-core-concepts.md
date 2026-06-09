@@ -199,7 +199,9 @@ function detectLanguage(text) {
   "native_language": "zh-CN",
   "default_target_language": "en",
   "privacy_mode": "standard",
-  "max_prompt_length": 4000
+  "max_prompt_length": 4000,
+  "display_mode": "compact",
+  "response_language_mode": "off"
 }
 ```
 
@@ -230,7 +232,24 @@ function detectLanguage(text) {
 
 ---
 
-## 7. Privacy Mode（隐私模式）
+## 7. Response Language Mode（回复语言模式）
+
+控制是否在 `additionalContext` 末尾追加指令，要求 Claude 以当前语言空间的目标语言回复。
+
+| 模式 | 含义 |
+|------|------|
+| `off` | 不干预 Claude 回复语言（默认）|
+| `target` | 追加 "Please respond entirely in {TargetLanguage}." 指令 |
+
+目标语言由当前语言空间的 `target_language` 字段决定（如 `en` → English，`ja` → Japanese）。如果语言代码不在已知映射表内，指令静默忽略。
+
+配置位置：`config.json`（全局）或语言空间的 `overrides`（单空间）。
+
+与 `summary_language` 可共存：Claude 先以目标语言完整回复，再附上母语摘要。
+
+---
+
+## 8. Privacy Mode（隐私模式）
 
 | 模式 | 行为 |
 |------|------|

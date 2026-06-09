@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from '../scripts/lib/prompts.mjs'
+import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx, buildResponseLanguageCtx } from '../scripts/lib/prompts.mjs'
 import { parseModelResponse } from '../scripts/lib/api.mjs'
 
 const MOCK_CONFIG = {
@@ -155,4 +155,35 @@ test('buildSummaryLanguageCtx: summary_language takes priority over native_langu
 
 test('buildSummaryLanguageCtx: returns empty string when summary_language = en', () => {
   assert.equal(buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language: 'en' }), '')
+})
+
+// ── buildResponseLanguageCtx ────────────────────────────────────────────────
+
+test('buildResponseLanguageCtx: returns empty string when mode is off', () => {
+  assert.equal(buildResponseLanguageCtx({ response_language_mode: 'off', target_language: 'ja' }), '')
+})
+
+test('buildResponseLanguageCtx: returns empty string when no config', () => {
+  assert.equal(buildResponseLanguageCtx(null), '')
+  assert.equal(buildResponseLanguageCtx(undefined), '')
+  assert.equal(buildResponseLanguageCtx({}), '')
+})
+
+test('buildResponseLanguageCtx: returns Japanese instruction for ja', () => {
+  const ctx = buildResponseLanguageCtx({ response_language_mode: 'target', target_language: 'ja' })
+  assert.equal(ctx, '\n\nPlease respond entirely in Japanese.')
+})
+
+test('buildResponseLanguageCtx: returns English instruction for en', () => {
+  const ctx = buildResponseLanguageCtx({ response_language_mode: 'target', target_language: 'en' })
+  assert.equal(ctx, '\n\nPlease respond entirely in English.')
+})
+
+test('buildResponseLanguageCtx: returns empty string for unknown language code', () => {
+  assert.equal(buildResponseLanguageCtx({ response_language_mode: 'target', target_language: 'xx' }), '')
+})
+
+test('buildResponseLanguageCtx: returns Chinese instruction for zh-CN', () => {
+  const ctx = buildResponseLanguageCtx({ response_language_mode: 'target', target_language: 'zh-CN' })
+  assert.equal(ctx, '\n\nPlease respond entirely in Chinese.')
 })

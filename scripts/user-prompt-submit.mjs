@@ -11,7 +11,7 @@ import {
   drainWarning,
 } from './lib/api.mjs'
 import { redact } from './lib/privacy.mjs'
-import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from './lib/prompts.mjs'
+import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx, buildResponseLanguageCtx } from './lib/prompts.mjs'
 import { debugLog } from './lib/debug.mjs'
 import { writeInstallPointer } from './lib/paths.mjs'
 
@@ -37,13 +37,15 @@ function buildAdditionalContext(result, detection, config) {
   const lang = result.detected_input_language || detection.lang
   const execPrompt = result.execution_prompt_en
   const summaryCtx = buildSummaryLanguageCtx(config)
+  const responseLangCtx = buildResponseLanguageCtx(config)
   if (config.execution_mode === 'english_optimized' || config.execution_mode === 'preview') {
     return (
       `CANONICAL REQUEST: The user's message is in ${lang}. ` +
       `They have configured My Lingo to optimize prompts to English. ` +
       `Treat the following as their actual request and ignore the language of their original message:\n\n` +
       execPrompt +
-      summaryCtx
+      summaryCtx +
+      responseLangCtx
     )
   }
   if (config.execution_mode === 'original_with_english_context') {
@@ -52,10 +54,11 @@ function buildAdditionalContext(result, detection, config) {
       `The user's original message may be in ${lang}. ` +
       `Here is an English version for reference:\n\n` +
       execPrompt +
-      summaryCtx
+      summaryCtx +
+      responseLangCtx
     )
   }
-  return execPrompt + summaryCtx
+  return execPrompt + summaryCtx + responseLangCtx
 }
 
 function buildSystemMessage(result, detection, latencyMs, config) {

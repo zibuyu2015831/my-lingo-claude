@@ -14,6 +14,9 @@ const DEFAULT_CONFIG = {
   max_prompt_length: 4000,
   circuit_breaker_cooldown_minutes: 5,
   domain_terms: [],
+  display_mode: 'compact',
+  target_language: 'en',
+  response_language_mode: 'off',
 }
 
 const DEFAULT_SPACE = {
@@ -50,6 +53,11 @@ export function loadConfig(cwd) {
   const spaces = loadSpaces()
   const activeSpaceName = spaces.active || 'english'
   const spaceObj = (spaces.spaces || {})[activeSpaceName] || {}
+  // Merge key space fields directly so config.target_language / display_mode / native_language
+  // always reflect the active space, not just the global default.
+  if (spaceObj.target_language) merged.target_language = spaceObj.target_language
+  if (spaceObj.native_language) merged.native_language = spaceObj.native_language
+  if (spaceObj.display_mode)    merged.display_mode    = spaceObj.display_mode
   if (spaceObj.overrides && typeof spaceObj.overrides === 'object') {
     merged = { ...merged, ...spaceObj.overrides }
   }

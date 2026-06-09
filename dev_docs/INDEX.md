@@ -35,7 +35,7 @@ my-lingo-claude/
 ├── commands/
 │   └── my-lingo/
 │       ├── setup.md             # /my-lingo:setup
-│       ├── status.md            # /my-lingo:info
+│       ├── info.md              # /my-lingo:info
 │       ├── last.md              # /my-lingo:last
 │       ├── mode.md              # /my-lingo:mode
 │       ├── use.md               # /my-lingo:use（切换语言空间）

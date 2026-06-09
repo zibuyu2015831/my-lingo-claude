@@ -278,7 +278,7 @@ export function writeLearningItem(record, space) {
 }
 
 // 列出 turns/ 目录下所有已有数据的日期，升序排列
-// 用于：/my-lingo:status 显示总记录数、/my-lingo:errors 扫描历史
+// 用于：/my-lingo:info 显示总记录数、/my-lingo:errors 扫描历史
 export function listTurnDates() {
   const dir = path.join(getDataDir(), 'turns')
   if (!fs.existsSync(dir)) return []

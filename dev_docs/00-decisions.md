@@ -483,7 +483,7 @@ allowed-tools: Bash, Read
 my-lingo-claude/
   commands/
     my-lingo/
-      status.md
+      info.md
       use.md
       mode.md
       last.md
@@ -510,7 +510,7 @@ my-lingo-claude/
 3. **同步 Prompt 优化**：调用外部 API，超时 8s，fallback 为发送原始输入
 4. **JSONL 存储**：turns 记录写入按日期分片的 JSONL
 5. **additionalContext + systemMessage 注入**：结构化指令注入
-6. **`/my-lingo:status`**：显示配置和今日统计
+6. **`/my-lingo:info`**：显示配置和今日统计
 7. **`/my-lingo:last`**：显示上一次的 original → execution_prompt
 8. **`/my-lingo:mode`**：切换执行模式
 9. **SessionEnd 钩子**：输出本次会话统计（corrections / translations 数量）
@@ -561,7 +561,7 @@ my-lingo-claude/
 |------|------|--------|
 | 用户界面、文档标题、对话中提及 | `My Lingo`（首字母大写 + 空格）| "My Lingo is a plugin..." |
 | `plugin.json` `name` 字段 | `my-lingo`（全小写 kebab-case）| `"name": "my-lingo"` |
-| 用户命令前缀 | `my-lingo`（全小写 kebab-case）| `/my-lingo:status` |
+| 用户命令前缀 | `my-lingo`（全小写 kebab-case）| `/my-lingo:info` |
 | 插件数据目录 | `my-lingo`（全小写 kebab-case）| `$CLAUDE_PLUGIN_DATA/my-lingo/` |
 | Git 仓库名 | `my-lingo-claude`（加平台后缀）| `github.com/xxx/my-lingo-claude` |
 | `package.json` `name` 字段 | `my-lingo-claude`（加平台后缀）| `"name": "my-lingo-claude"` |

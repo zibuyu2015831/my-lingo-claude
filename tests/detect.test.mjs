@@ -43,7 +43,7 @@ test('detectLanguage: whitespace-only returns en without throwing', () => {
 // ── shouldSkip ──────────────────────────────────────────────────────────────
 
 test('shouldSkip: slash command → true', () => {
-  assert.equal(shouldSkip('/my-lingo:status'), true)
+  assert.equal(shouldSkip('/my-lingo:info'), true)
 })
 
 test('shouldSkip: short prompt "ok" → true', () => {
@@ -87,7 +87,7 @@ test('detectMode: English → english mode', () => {
 })
 
 test('detectMode: slash command → skip mode', () => {
-  const result = detectMode('/my-lingo:status')
+  const result = detectMode('/my-lingo:info')
   assert.equal(result.mode, 'skip')
 })
 

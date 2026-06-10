@@ -13,7 +13,10 @@ Display the most frequent vocabulary items recorded from your interactions.
 
 ```bash
 node --input-type=module << 'EOF'
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd()
+import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
 const { loadConfig, loadSpaces, getActiveSpace } = await import(ROOT + '/scripts/lib/config.mjs')
 const { listItemMonths, readLearningItems } = await import(ROOT + '/scripts/lib/storage.mjs')
 

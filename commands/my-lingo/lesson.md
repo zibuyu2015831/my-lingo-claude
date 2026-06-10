@@ -12,7 +12,14 @@ Generate a personalized language lesson based on your recent interactions and le
 ### Step 1: Generate the lesson
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/generate-lesson.mjs" $ARGUMENTS
+# Resolve the plugin root: prefer the env var (set in dev/test), else read the
+# install pointer the hook writes (dev_docs/14 §六-F), else fall back to cwd.
+ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  ROOT="$(node -e "try{const fs=require('fs'),p=require('path'),os=require('os');process.stdout.write(JSON.parse(fs.readFileSync(p.join(os.homedir(),'.claude','plugins','data','my-lingo','install.json'),'utf8')).plugin_root||'')}catch{}")"
+fi
+ROOT="${ROOT:-$PWD}"
+node "$ROOT/scripts/generate-lesson.mjs" $ARGUMENTS
 ```
 
 ### Step 2: Display the lesson

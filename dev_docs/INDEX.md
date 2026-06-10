@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.5 已完成**（SQLite 存储迁移；222 单元测试 + 12 集成测试通过）|
+| 当前阶段 | **v0.5 + 架构审查修复轮**（见根目录 `ARCHITECTURE_REVIEW.md`）；**241 单元 + 14 集成测试通过** |
 
 ---
 
@@ -35,10 +35,12 @@ my-lingo-claude/
 ├── commands/
 │   └── my-lingo/
 │       ├── setup.md             # /my-lingo:setup
-│       ├── status.md            # /my-lingo:status
+│       ├── info.md              # /my-lingo:info
 │       ├── last.md              # /my-lingo:last
 │       ├── mode.md              # /my-lingo:mode
 │       ├── use.md               # /my-lingo:use（切换语言空间）
+│       ├── addspace.md          # /my-lingo:addspace（创建并切换到新语言空间）
+│       ├── rmspace.md           # /my-lingo:rmspace（删除语言空间）
 │       ├── space.md             # /my-lingo:space（查看当前空间配置）
 │       ├── spaces.md            # /my-lingo:spaces（列出所有语言空间）
 │       ├── recent.md            # /my-lingo:recent（近期纠错）
@@ -196,7 +198,7 @@ Claude 会话结束
 
 ## 实现状态（v0.5 完成）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）；222 单元测试 + 12 集成测试通过**
+当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，`ARCHITECTURE_REVIEW.md`）；241 单元测试 + 14 集成测试通过**
 
 ### v0.1 实现阶段（MVP）
 
@@ -249,7 +251,7 @@ Claude 会话结束
 3. 同步 Prompt 优化（调用外部 API，超时 8s，fallback）
 4. JSONL 存储（turns 按日期分片写入）
 5. `additionalContext` + `systemMessage` 注入（结构化指令）
-6. `/my-lingo:status`（配置和今日统计）
+6. `/my-lingo:info`（配置和今日统计）
 7. `/my-lingo:last`（上一次 original → execution_prompt）
 8. `/my-lingo:mode`（切换执行模式）
 9. SessionEnd 钩子（会话统计输出 stderr）

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { redact } from '../scripts/lib/privacy.mjs'
+import { redact, redactMessages } from '../scripts/lib/privacy.mjs'
 
 // ── API keys ─────────────────────────────────────────────────────────────────
 
@@ -115,4 +115,38 @@ test('redact: package name "sk-learn" not redacted', () => {
 test('redact: public IP not redacted', () => {
   const result = redact('server: 8.8.8.8')
   assert.equal(result, 'server: 8.8.8.8')
+})
+
+// ── redactMessages: the outbound API boundary scrubber (F2 / D-A) ─────────────
+
+test('redactMessages: scrubs secrets in every message content', () => {
+  const messages = [
+    { role: 'system', content: 'You are a helper.' },
+    { role: 'user', content: 'deploy with password=hunter2 to 192.168.1.10' },
+  ]
+  const out = redactMessages(messages)
+  assert.ok(out[1].content.includes('[REDACTED]'), `password not scrubbed: ${out[1].content}`)
+  assert.ok(out[1].content.includes('[PRIVATE_IP]'), `IP not scrubbed: ${out[1].content}`)
+  assert.ok(!out[1].content.includes('hunter2'), `secret leaked: ${out[1].content}`)
+  // system message left intact
+  assert.equal(out[0].content, 'You are a helper.')
+})
+
+test('redactMessages: privacyMode=off passes through unchanged', () => {
+  const messages = [{ role: 'user', content: 'sk-abc1234567890abcdef12345' }]
+  assert.equal(redactMessages(messages, 'off'), messages)
+})
+
+test('redactMessages: does not mutate the input array', () => {
+  const messages = [{ role: 'user', content: 'token=abc1234567890' }]
+  const out = redactMessages(messages)
+  assert.equal(messages[0].content, 'token=abc1234567890', 'input must be untouched')
+  assert.notEqual(out[0], messages[0], 'should return new message objects')
+})
+
+test('redactMessages: tolerates non-array / non-string content', () => {
+  assert.equal(redactMessages(null), null)
+  const messages = [{ role: 'user', content: { parts: ['x'] } }]
+  const out = redactMessages(messages)
+  assert.deepEqual(out[0].content, { parts: ['x'] }, 'non-string content untouched')
 })

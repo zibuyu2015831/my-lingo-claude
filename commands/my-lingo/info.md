@@ -1,5 +1,5 @@
 ---
-name: status
+name: info
 description: Show current My Lingo status, configuration, and today's stats.
 allowed-tools: Bash, Read, Glob
 ---
@@ -14,7 +14,10 @@ Display the current My Lingo configuration and today's optimization statistics.
 node --input-type=module --eval "
 import fs from 'node:fs';
 import path from 'node:path';
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || process.cwd();
+import os from 'node:os';
+let ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+if (!ROOT) { try { ROOT = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'plugins', 'data', 'my-lingo', 'install.json'), 'utf8')).plugin_root; } catch {} }
+ROOT = ROOT || process.cwd();
 const { readTurnsForDay, countTotalTurns, getDataDir } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 const dataDir = getDataDir();

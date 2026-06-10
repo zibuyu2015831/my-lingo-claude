@@ -33,7 +33,7 @@ test('loadConfig: missing config.json returns DEFAULT_CONFIG', () => {
 
 test('loadConfig: corrupt config.json does not throw, returns defaults', () => {
   withTempData((dir) => {
-    const cfgDir = path.join(dir, 'my-lingo')
+    const cfgDir = dir
     fs.mkdirSync(cfgDir, { recursive: true })
     fs.writeFileSync(path.join(cfgDir, 'config.json'), 'not valid json')
     const cfg = loadConfig(null)
@@ -45,7 +45,7 @@ test('loadConfig: corrupt config.json does not throw, returns defaults', () => {
 
 test('loadConfig: global config.json overrides defaults', () => {
   withTempData((dir) => {
-    const cfgDir = path.join(dir, 'my-lingo')
+    const cfgDir = dir
     fs.mkdirSync(cfgDir, { recursive: true })
     fs.writeFileSync(path.join(cfgDir, 'config.json'), JSON.stringify({
       timeout_seconds: 15,
@@ -62,7 +62,7 @@ test('loadConfig: global config.json overrides defaults', () => {
 
 test('loadConfig: project .claude-my-lingo.json overrides global', () => {
   withTempData((dir) => {
-    const cfgDir = path.join(dir, 'my-lingo')
+    const cfgDir = dir
     fs.mkdirSync(cfgDir, { recursive: true })
     fs.writeFileSync(path.join(cfgDir, 'config.json'), JSON.stringify({ timeout_seconds: 15 }))
 
@@ -83,7 +83,7 @@ test('writeConfig: writes correct content', () => {
   withTempData((dir) => {
     const payload = { execution_mode: 'off', timeout_seconds: 12 }
     writeConfig(payload)
-    const cfgPath = path.join(dir, 'my-lingo', 'config.json')
+    const cfgPath = path.join(dir, 'config.json')
     assert.ok(fs.existsSync(cfgPath))
     const read = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
     assert.equal(read.execution_mode, 'off')
@@ -94,7 +94,7 @@ test('writeConfig: writes correct content', () => {
 test('writeConfig: file permission is 0o600', () => {
   withTempData((dir) => {
     writeConfig({ execution_mode: 'off' })
-    const cfgPath = path.join(dir, 'my-lingo', 'config.json')
+    const cfgPath = path.join(dir, 'config.json')
     const stat = fs.statSync(cfgPath)
     assert.equal(stat.mode & 0o777, 0o600)
   })
@@ -102,7 +102,8 @@ test('writeConfig: file permission is 0o600', () => {
 
 test('writeConfig: creates directory if missing', () => {
   withTempData((dir) => {
-    const cfgDir = path.join(dir, 'my-lingo')
+    const cfgDir = path.join(dir, 'nested') // not yet created
+    process.env.CLAUDE_PLUGIN_DATA = cfgDir
     assert.ok(!fs.existsSync(cfgDir))
     writeConfig({ execution_mode: 'english_optimized' })
     assert.ok(fs.existsSync(cfgDir))

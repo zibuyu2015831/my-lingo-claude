@@ -15,7 +15,7 @@ my-lingo-claude/
 ├── commands/
 │   └── my-lingo/                    # 命令 namespace
 │       ├── setup.md                 # /my-lingo:setup
-│       ├── status.md                # /my-lingo:status
+│       ├── info.md                  # /my-lingo:info
 │       ├── last.md                  # /my-lingo:last
 │       ├── mode.md                  # /my-lingo:mode
 │       ├── space.md                 # /my-lingo:space (v0.2)
@@ -158,7 +158,7 @@ description: |
   Show current My Lingo status, configuration, and today's stats.
   <example>
   Context: User wants to check what language space is active and how many prompts were optimized today.
-  user: "/my-lingo:status"
+  user: "/my-lingo:info"
   assistant: "Reading My Lingo configuration and today's JSONL data to display status."
   </example>
 argument-hint: ""

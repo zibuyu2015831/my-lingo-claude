@@ -19,6 +19,12 @@ test('transcriptPath: path without underscore', () => {
   assert.equal(result, expected)
 })
 
+test('transcriptPath: non-alphanumeric chars (. and space) are also replaced (F8)', () => {
+  const result = transcriptPath('/home/user/my.app dir', 'sess')
+  const expected = path.join(os.homedir(), '.claude', 'projects', '-home-user-my-app-dir', 'sess.jsonl')
+  assert.equal(result, expected)
+})
+
 test('transcriptPath: session id is included as filename', () => {
   const result = transcriptPath('/tmp/proj', 'my-session-id')
   assert.ok(result.endsWith('my-session-id.jsonl'), `unexpected path: ${result}`)

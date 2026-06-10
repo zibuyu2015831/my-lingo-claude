@@ -104,7 +104,7 @@ My Lingo **不**应该变成：
 | 场景 | 形式 | 示例 |
 |------|------|------|
 | 用户界面、文档标题、对话中提及 | `My Lingo`（首字母大写 + 空格）| "My Lingo is a plugin..." |
-| plugin.json `name`、命令前缀、数据目录 | `my-lingo`（全小写 kebab-case）| `/my-lingo:status`、`$CLAUDE_PLUGIN_DATA/my-lingo/` |
+| plugin.json `name`、命令前缀、数据目录 | `my-lingo`（全小写 kebab-case）| `/my-lingo:info`、`$CLAUDE_PLUGIN_DATA/my-lingo/` |
 | Git 仓库名、package.json `name` | `my-lingo-claude`（加平台后缀）| `github.com/xxx/my-lingo-claude` |
 | JS 代码变量、函数前缀 | `myLingo`（camelCase）| `const myLingoConfig = ...` |
 

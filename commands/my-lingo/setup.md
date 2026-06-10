@@ -54,32 +54,22 @@ if (!allRequired) {
 
 If the script exits with code 1, stop here and do not continue to the next steps.
 
-### Step 2: Initialize spaces.json (if missing)
+### Step 2: (no disk initialization)
 
-```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data}"
-SPACES_FILE="$CLAUDE_PLUGIN_DATA/my-lingo/spaces.json"
-mkdir -p "$(dirname "$SPACES_FILE")"
-if [ ! -f "$SPACES_FILE" ]; then
-  cat > "$SPACES_FILE" << 'SPACES_EOF'
-{
-  "active": "english",
-  "spaces": {
-    "english": {
-      "key": "english",
-      "display_name": "English",
-      "target_language": "en",
-      "native_language": "zh-CN",
-      "level": "intermediate",
-      "display_mode": "compact",
-      "auto_generate_learning": true
-    }
-  }
-}
-SPACES_EOF
-  echo "Initialized spaces.json"
-fi
-```
+`setup` intentionally writes **nothing** to disk. The plugin's data directory can
+only be resolved reliably by the hook process (which alone sees `CLAUDE_PLUGIN_DATA`),
+and the hook does not run until the user sends their first message. Until then,
+`getDataDir()` has no pointer to read and would fail. So:
+
+- API credentials come exclusively from environment variables (verified in Step 1).
+- The default language space (`english`) and default execution mode
+  (`english_optimized`) are built into the code — no `spaces.json` / `config.json`
+  needs to exist for the plugin to work.
+- Anything that must persist (a non-default mode via `/my-lingo:mode`, a space
+  switch via `/my-lingo:use`) is written **after** the first message, once the hook
+  has written the install pointer.
+
+See dev_docs/14 §10.4-A.
 
 ### Step 3: Verify API connectivity
 
@@ -136,26 +126,19 @@ If the connectivity test fails, stop here and advise the user to check their env
 
 ```bash
 node -e "
-const CLAUDE_PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA
-  || require('path').join(require('os').homedir(), '.claude', 'plugins', 'data');
-const path = require('path');
-const fs   = require('fs');
-
-let spaces = { active: 'english' };
-try { spaces = JSON.parse(fs.readFileSync(path.join(CLAUDE_PLUGIN_DATA, 'my-lingo', 'spaces.json'), 'utf8')); } catch {}
-
-let cfg = {};
-try { cfg = JSON.parse(fs.readFileSync(path.join(CLAUDE_PLUGIN_DATA, 'my-lingo', 'config.json'), 'utf8')); } catch {}
-
 console.log('');
 console.log('[my-lingo] Setup complete!');
 console.log('  API URL:   ' + process.env.MY_LINGO_API_BASE_URL + '  (env)');
 console.log('  API Key:   ****' + (process.env.MY_LINGO_API_KEY || '').slice(-4) + '  (env)');
 console.log('  Model:     ' + process.env.MY_LINGO_MODEL_FAST + '  (env)');
-console.log('  Mode:      ' + (cfg.execution_mode || 'english_optimized'));
-console.log('  Language:  ' + (cfg.native_language || 'zh-CN'));
-console.log('  Space:     ' + (spaces.active || 'english'));
+console.log('  Mode:      english_optimized  (default)');
+console.log('  Language:  zh-CN  (default)');
+console.log('  Space:     english  (default)');
 console.log('');
-console.log('Run /my-lingo:status to verify at any time.');
+console.log('Send any message to Claude to activate the plugin (the hook records');
+console.log('your first turn and writes the install pointer). After that:');
+console.log('  • /my-lingo:info  — verify configuration and stats');
+console.log('  • /my-lingo:mode    — change execution mode (persists)');
+console.log('  • /my-lingo:use     — switch language space (persists)');
 "
 ```

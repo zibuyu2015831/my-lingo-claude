@@ -15,9 +15,10 @@ import {
   writeConfig, writeCircuitJson, circuitJsonExists, readCircuitJson,
   seedTurns, readTurnsForDate, seedCorrections, seedItems, dbCall,
   runHookSync, runHookAsync, runSessionEnd, runSessionEndAsync,
-  runCommandBlock,
+  runCommandBlock, runCommandBlockEnvBlind, writeInstallPointerAt,
   ROOT,
 } from './helpers.mjs'
+import os from 'node:os'
 
 // Minimal config shared across sync tests (no real API involved).
 function baseConfig(overrides = {}) {
@@ -57,9 +58,9 @@ test('PT-004: -- prefix — skips optimization, emits [my-lingo] --:', () => {
   }
 })
 
-// ── PT-002: Circuit breaker opens after first API failure ────────────────────
+// ── PT-002: Circuit breaker trips only after 3 consecutive failures (D4) ──────
 
-test('PT-002: circuit breaker — first failure gives "API unavailable", second gives "Circuit breaker open"', () => {
+test('PT-002: circuit breaker — transient failures retry; opens only after the 3rd', () => {
   const dataDir = makeTmpDir()
   try {
     // Port 1 causes immediate connection refused — no waiting for timeout
@@ -67,22 +68,27 @@ test('PT-002: circuit breaker — first failure gives "API unavailable", second 
     const prompt = '请帮我检查这段代码有没有问题'
     const credEnv = { MY_LINGO_API_BASE_URL: 'http://127.0.0.1:1', MY_LINGO_MODEL_FAST: 'test' }
 
-    // Attempt 1: circuit closed → API fails → "API unavailable"
-    const r1 = runHookSync(prompt, { dataDir, env: credEnv })
-    assert.equal(r1.status, 0, 'attempt 1 exits 0')
-    assert.ok(r1.json?.systemMessage?.includes('API unavailable'),
-      `attempt 1 should say "API unavailable", got: ${r1.json?.systemMessage}`)
+    // Attempts 1 & 2: a single/double transient blip must NOT pause the API —
+    // each still attempts the call and reports "API unavailable".
+    for (const attempt of [1, 2]) {
+      const r = runHookSync(prompt, { dataDir, env: credEnv })
+      assert.equal(r.status, 0, `attempt ${attempt} exits 0`)
+      assert.ok(r.json?.systemMessage?.includes('API unavailable'),
+        `attempt ${attempt} should say "API unavailable", got: ${r.json?.systemMessage}`)
+      assert.equal(readCircuitJson(dataDir).failure_count, attempt, `failure_count after attempt ${attempt}`)
+    }
 
-    // circuit.json should now exist
-    assert.ok(circuitJsonExists(dataDir), 'circuit.json created after first failure')
-    const c = readCircuitJson(dataDir)
-    assert.equal(c.failure_count, 1)
+    // Attempt 3: the 3rd consecutive failure trips the breaker.
+    const r3 = runHookSync(prompt, { dataDir, env: credEnv })
+    assert.equal(readCircuitJson(dataDir).failure_count, 3)
+    assert.ok(r3.json?.systemMessage?.includes('tripped'),
+      `attempt 3 should announce the breaker tripped, got: ${r3.json?.systemMessage}`)
 
-    // Attempt 2: circuit open (recent failure) → "Circuit breaker open"
-    const r2 = runHookSync(prompt, { dataDir, env: credEnv })
-    assert.equal(r2.status, 0, 'attempt 2 exits 0')
-    assert.ok(r2.json?.systemMessage?.includes('Circuit breaker open'),
-      `attempt 2 should say "Circuit breaker open", got: ${r2.json?.systemMessage}`)
+    // Attempt 4: breaker now OPEN → API skipped → "Circuit breaker open".
+    const r4 = runHookSync(prompt, { dataDir, env: credEnv })
+    assert.equal(r4.status, 0, 'attempt 4 exits 0')
+    assert.ok(r4.json?.systemMessage?.includes('Circuit breaker open'),
+      `attempt 4 should say "Circuit breaker open", got: ${r4.json?.systemMessage}`)
   } finally {
     cleanup(dataDir)
   }
@@ -375,7 +381,7 @@ test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown',
     assert.equal(result.status, 0, `generate-lesson should exit 0, stderr: ${result.stderr}`)
     assert.ok(result.stdout.includes('# My Lingo Lesson'), `stdout should contain lesson heading, got: ${result.stdout.slice(0, 200)}`)
 
-    const lessonFile = path.join(dataDir, 'my-lingo', 'learning', 'english', `lessons-${today}.md`)
+    const lessonFile = path.join(dataDir, 'learning', 'english', `lessons-${today}.md`)
     assert.ok(fs.existsSync(lessonFile), `lesson file should exist: ${lessonFile}`)
     const fileContent = fs.readFileSync(lessonFile, 'utf8')
     assert.ok(fileContent.includes('# My Lingo Lesson'), 'lesson file should contain heading')
@@ -428,7 +434,7 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
     const sessionId = 'test-session-013'
     writeConfig(dataDir, { execution_mode: 'english_optimized', native_language: 'zh-CN' })
     fs.writeFileSync(
-      path.join(dataDir, 'my-lingo', 'spaces.json'),
+      path.join(dataDir, 'spaces.json'),
       JSON.stringify({ active: 'english', spaces: { english: {} } }),
     )
 
@@ -449,7 +455,7 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
 
     // [command, substring that only appears when seeded data was actually read]
     const cases = [
-      ['status', 'Total turns:  1'],
+      ['info', 'Total turns:  1'],
       ['recent', 'helo wrld'],
       ['last', 'Hello world'],
       ['errors', 'hello world'],
@@ -472,5 +478,74 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
     }
   } finally {
     cleanup(dataDir)
+  }
+})
+
+// ── PT-015: env-blind production form — commands resolve via the install pointer ─
+// The REAL production form: a user runs the slash command from their own project,
+// so the command's bash subprocess sees NEITHER CLAUDE_PLUGIN_ROOT NOR
+// CLAUDE_PLUGIN_DATA. The hook has written install.json; commands must read it to
+// locate both the plugin root (to import modules) and the data dir (to read data).
+// The old harness always injected both env vars and so could never catch the
+// silent-fallback bug this guards against. dev_docs/14 §六-F / §10.5.6.
+
+test('PT-015: data commands resolve via install.json pointer with NO plugin env vars', () => {
+  const dataDir = makeTmpDir()
+  const home = makeTmpDir()
+  try {
+    const sessionId = 'test-session-015'
+    // Seed straight into dataDir (getDataDir() == CLAUDE_PLUGIN_DATA == dataDir here).
+    seedTurns(dataDir, [
+      { session_id: sessionId, mode: 'english_optimized', detected_language: 'en',
+        original_prompt: 'helo wrld', execution_prompt: 'Hello world', rewrite_type: 'correction', fallback: false },
+    ])
+    seedItems(dataDir, 'english', [
+      { ts: new Date().toISOString(), session_id: sessionId, type: 'phrase',
+        target_text: 'kick off', native_explanation: '开始' },
+    ])
+    // The hook would have written this pointer; commands must rely on it alone.
+    writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir })
+
+    const cases = [
+      ['info', 'Total turns:  1'],
+      ['recent', 'helo wrld'],
+      ['last', 'Hello world'],
+      ['vocab', 'kick off'],
+      ['space', 'english'],
+    ]
+    for (const [name, needle] of cases) {
+      const r = runCommandBlockEnvBlind(name, { home })
+      assert.equal(r.status, 0, `/${name} should exit 0 env-blind via pointer, stderr: ${r.stderr}`)
+      assert.ok(
+        r.stdout.includes(needle),
+        `/${name} env-blind output should contain "${needle}". Got:\n${r.stdout}\n${r.stderr}`,
+      )
+    }
+  } finally {
+    cleanup(dataDir)
+    cleanup(home)
+  }
+})
+
+// ── PT-016: no pointer + no env → loud, actionable failure (NOT a silent "0") ──
+// Before the fix, an unresolved data dir fell back to a phantom directory and
+// commands cheerfully printed "0 turns". The whole point of the rewrite is that
+// this now fails loudly. dev_docs/14 §10.2 ③ / §10.5.6.
+
+test('PT-016: a read command with a resolvable plugin but no data dir fails loudly, not silently', () => {
+  const home = makeTmpDir()
+  try {
+    // Pointer can locate the plugin (so modules import) but carries NO data_dir,
+    // mimicking "hook never recorded the real data dir". getDataDir() must throw
+    // a clear error instead of silently falling back to a phantom "0 turns" dir.
+    writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir: undefined })
+    const r = runCommandBlockEnvBlind('info', { home })
+    assert.notEqual(r.status, 0, `/info should fail (non-zero) when the data dir is unresolvable. stdout:\n${r.stdout}`)
+    assert.ok(
+      /data dir unresolved/.test(r.stderr) || /data dir unresolved/.test(r.stdout),
+      `error should explain how to recover. stdout:\n${r.stdout}\nstderr:\n${r.stderr}`,
+    )
+  } finally {
+    cleanup(home)
   }
 })

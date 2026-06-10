@@ -1,0 +1,11 @@
+{
+  "name": "my-lingo-local",
+  "owner": { "name": "Zane" },
+  "plugins": [
+    {
+      "name": "my-lingo",
+      "source": "./",
+      "description": "My Lingo — prompt optimization and language learning for Claude Code."
+    }
+  ]
+}

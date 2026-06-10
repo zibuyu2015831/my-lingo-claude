@@ -1,3 +1,9 @@
+const LANG_CODE_TO_NAME = {
+  en: 'English', ja: 'Japanese', de: 'German', fr: 'French',
+  ko: 'Korean', es: 'Spanish', it: 'Italian', pt: 'Portuguese',
+  ru: 'Russian', ar: 'Arabic', 'zh-CN': 'Chinese', 'zh-TW': 'Chinese (Traditional)',
+}
+
 const OPTIMIZATION_SYSTEM = `You are a prompt optimizer for Claude Code, a professional AI coding assistant.
 Your job is to transform the user's input into an optimal English execution prompt.
 
@@ -55,9 +61,22 @@ export function buildRefineMessages(prompt, config) {
 }
 
 // Builds a trailing instruction for Claude to append a native-language summary.
-// Returns empty string when not applicable (lang is 'en' or not configured).
+// OFF by default — only emits when summary_language_mode === 'native' (explicit
+// opt-in, mirroring response_language_mode). Previously this was unconditionally
+// on for any non-English native language, silently appending a summary request to
+// every single turn. See ARCHITECTURE_REVIEW F6 / D-E.
 export function buildSummaryLanguageCtx(config) {
+  if (config?.summary_language_mode !== 'native') return ''
   const lang = config.summary_language || config.native_language
   if (!lang || lang === 'en') return ''
   return `\n\nAfter your response, append a brief summary in ${lang} (2-3 sentences) so the user can quickly grasp the key points in their native language.`
+}
+
+// Builds a trailing instruction requiring Claude to respond in the active space's
+// target language. Returns empty string when mode is 'off' or language code is unknown.
+export function buildResponseLanguageCtx(config) {
+  if (config?.response_language_mode !== 'target') return ''
+  const langName = LANG_CODE_TO_NAME[config?.target_language]
+  if (!langName) return ''
+  return `\n\nPlease respond entirely in ${langName}.`
 }

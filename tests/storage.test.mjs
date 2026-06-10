@@ -68,7 +68,7 @@ const BASE_CONFIG = {
 test('writeTurn: data.db is created after write', () => {
   withTempData((dir) => {
     writeTurn(BASE_INPUT, BASE_CONFIG)
-    const file = path.join(dir, 'my-lingo', 'data.db')
+    const file = path.join(dir, 'data.db')
     assert.ok(fs.existsSync(file), `data.db not found: ${file}`)
     assert.equal(readTurnsForDay(TODAY).length, 1)
   })
@@ -238,7 +238,9 @@ test('writeTurn: write failure does not throw', () => {
     // Block DB creation: place a regular file where the data dir should be, so
     // getDb()'s mkdir of that path fails. writeTurn must swallow the error.
     resetDb()
-    fs.writeFileSync(path.join(dir, 'my-lingo'), 'not-a-dir')
+    const blocked = path.join(dir, 'blocked')
+    fs.writeFileSync(blocked, 'not-a-dir')
+    process.env.CLAUDE_PLUGIN_DATA = blocked // data dir is now a file → getDb()'s mkdir fails
     assert.doesNotThrow(() => writeTurn(BASE_INPUT, BASE_CONFIG))
   })
 })
@@ -514,7 +516,9 @@ test('readResponsesForSession: unknown session → empty array, no throw', () =>
 test('writeResponseRecord: write failure does not throw', () => {
   withTempData((dir) => {
     resetDb()
-    fs.writeFileSync(path.join(dir, 'my-lingo'), 'not-a-dir')
+    const blocked = path.join(dir, 'blocked')
+    fs.writeFileSync(blocked, 'not-a-dir')
+    process.env.CLAUDE_PLUGIN_DATA = blocked // data dir is now a file → getDb()'s mkdir fails
     assert.doesNotThrow(() => writeResponseRecord({ session_id: 'sess-001', text: 'test', word_count: 1 }))
   })
 })

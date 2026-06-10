@@ -39,9 +39,12 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 | Command | What it does |
 |---------|-------------|
 | `/my-lingo:setup` | Check env var status and verify API connectivity |
-| `/my-lingo:status` | Current config, active language space, today's stats |
+| `/my-lingo:info` | Current config, active language space, today's stats |
 | `/my-lingo:last` | Show the original → optimized diff for your last prompt |
 | `/my-lingo:mode` | Switch execution mode (optimized / raw / off / …) |
+| `/my-lingo:space` | Show current language space config and learning stats |
+| `/my-lingo:spaces` | List all configured language spaces with stats |
+| `/my-lingo:use` | Switch active language space |
 | `/my-lingo:vocab` | Top vocabulary extracted from your recent interactions |
 | `/my-lingo:sentences` | Sentence patterns found in recent interactions |
 | `/my-lingo:errors` | Most common error patterns in your English |
@@ -57,7 +60,7 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 ## Requirements
 
 - **Claude Code** (with plugin support)
-- **Node.js ≥ 18** (uses built-in `node:test`, `node:http`, etc. — no npm packages required)
+- **Node.js ≥ 22.5.0** (uses built-in `node:sqlite`, `node:test`, etc. — no npm packages required)
 - **`curl`** available in your PATH
 - An **OpenAI-compatible API key** — any provider works: OpenAI, DeepSeek, Groq, a local Ollama instance, etc.
 
@@ -147,8 +150,8 @@ At the end of a session, My Lingo automatically analyses the rewrites and saves 
 If you're learning more than one language, each has its own isolated space with separate vocabulary, error records, and lessons:
 
 ```
-/my-lingo:setlang japanese    ← switch to Japanese space
-/my-lingo:status              ← confirm active space
+/my-lingo:use japanese    ← switch to Japanese space
+/my-lingo:info            ← confirm active space
 ```
 
 ---
@@ -159,16 +162,15 @@ All data is stored locally under `$CLAUDE_PLUGIN_DATA/my-lingo/` (no cloud sync,
 
 ```
 $CLAUDE_PLUGIN_DATA/my-lingo/
-├── config.json                   # API key and global settings (mode 0600)
-├── spaces.json                   # Language space configuration
-├── circuit.json                  # Circuit breaker state (auto-managed)
-├── turns/
-│   └── YYYY-MM-DD.jsonl          # Daily prompt records
-└── learning/
-    └── english/
-        ├── corrections-YYYY-MM.jsonl   # Grammar corrections
-        ├── items-YYYY-MM.jsonl         # Vocabulary and sentence patterns (SRS)
-        └── lessons-YYYY-MM-DD.md      # Generated lessons
+├── config.json      # Global settings (mode 0600)
+├── spaces.json      # Language space configuration
+├── circuit.json     # Circuit breaker state (auto-managed)
+└── data.db          # SQLite database (WAL mode)
+    ├── turns        # Prompt records per session
+    ├── responses    # Claude's replies (captured by Stop hook)
+    ├── corrections  # Language corrections
+    ├── learning_items  # Vocabulary + SRS state
+    └── sessions     # Session summaries
 ```
 
 Your API key is stored only in `config.json` and is never written to git or transmitted anywhere other than your chosen API endpoint.
@@ -182,16 +184,30 @@ Your API key is stored only in `config.json` and is never written to git or tran
 | `english_optimized` | Default. Rewrites to English; Claude receives the optimized version. |
 | `original` | No rewrite; prompts still recorded for later analysis. |
 | `original_with_english_context` | Sends both; Claude can see both the original and English reference. |
+| `preview` | Alias for `english_optimized`. |
 | `off` | Completely disabled; no recording. |
 
 Switch with `/my-lingo:mode` or by editing `config.json`.
 
 ---
 
+## Response language
+
+Set `response_language_mode` in `config.json` to control the language Claude replies in:
+
+| Value | Behaviour |
+|-------|-----------|
+| `off` | Default. Claude replies in whatever language it chooses. |
+| `target` | Injects an instruction asking Claude to respond in the active space's target language. |
+
+This is useful when you want immersive practice: your prompts are optimized to English while Claude's replies come back in (say) Japanese.
+
+---
+
 ## Privacy
 
 - Prompts are **redacted** before being sent to the external API: API keys, passwords, private IPs, connection string credentials, and username-based paths are stripped.
-- Your **raw prompts are stored locally** in JSONL files (never sent to any third party other than your chosen API).
+- Your **raw prompts are stored locally** in a SQLite database (never sent to any third party other than your chosen API).
 - `config.json` (containing your API key) is written with permission `0600` and is `.gitignore`d.
 
 ---

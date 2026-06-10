@@ -42,25 +42,25 @@ export function cleanup(dir) {
 
 // Write CLAUDE_PLUGIN_DATA/my-lingo/config.json
 export function writeConfig(dataDir, config) {
-  const dir = path.join(dataDir, 'my-lingo')
+  const dir = dataDir
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config), { mode: 0o600 })
 }
 
 // Write a pre-populated circuit.json (for PT-002/003 setup)
 export function writeCircuitJson(dataDir, data) {
-  const dir = path.join(dataDir, 'my-lingo')
+  const dir = dataDir
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   fs.writeFileSync(path.join(dir, 'circuit.json'), JSON.stringify(data))
 }
 
 export function circuitJsonExists(dataDir) {
-  return fs.existsSync(path.join(dataDir, 'my-lingo', 'circuit.json'))
+  return fs.existsSync(path.join(dataDir, 'circuit.json'))
 }
 
 export function readCircuitJson(dataDir) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(dataDir, 'my-lingo', 'circuit.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(path.join(dataDir, 'circuit.json'), 'utf8'))
   } catch { return null }
 }
 
@@ -97,6 +97,10 @@ function baseEnv(dataDir, extra = {}) {
   return {
     ...process.env,
     CLAUDE_PLUGIN_DATA: dataDir,
+    // Sandbox $HOME so the hook's writeInstallPointer() writes the install
+    // pointer under the temp data dir instead of polluting the real
+    // ~/.claude/plugins/data/my-lingo/install.json (dev_docs/14 §六-F).
+    HOME: dataDir,
     MY_LINGO_API_KEY: 'sk-test',
     ...extra,
   }
@@ -145,6 +149,7 @@ export function runSessionEnd({ dataDir, sessionId = 'test-session', env = {} } 
     env: {
       ...process.env,
       CLAUDE_PLUGIN_DATA: dataDir,
+      HOME: dataDir, // sandbox the install-pointer write (see baseEnv)
       CLAUDE_SESSION_ID: sessionId,
       ...env,
     },
@@ -160,6 +165,7 @@ export function runSessionEndAsync({ dataDir, sessionId = 'test-session', timeou
       env: {
         ...process.env,
         CLAUDE_PLUGIN_DATA: dataDir,
+        HOME: dataDir, // sandbox the install-pointer write (see baseEnv)
         CLAUDE_SESSION_ID: sessionId,
         MY_LINGO_API_KEY: 'sk-test',
         ...env,
@@ -217,6 +223,36 @@ export function runCommandBlock(commandName, { dataDir, blockIndex = 0, env = {}
       ARGUMENTS: '',
       ...env,
     },
+  })
+  return { status: res.status, stdout: res.stdout || '', stderr: res.stderr || '' }
+}
+
+// Write an install.json pointer under a fake $HOME, exactly where a hook would
+// (dev_docs/14 §六-F). Returns the pointer path.
+export function writeInstallPointerAt(home, { pluginRoot = ROOT, dataDir }) {
+  const dir = path.join(home, '.claude', 'plugins', 'data', 'my-lingo')
+  fs.mkdirSync(dir, { recursive: true })
+  const p = path.join(dir, 'install.json')
+  fs.writeFileSync(p, JSON.stringify({ plugin_root: pluginRoot, data_dir: dataDir }, null, 2))
+  return p
+}
+
+// Run a command bash block in the REAL production form: env-blind (NEITHER
+// CLAUDE_PLUGIN_ROOT NOR CLAUDE_PLUGIN_DATA set), foreign cwd, $HOME redirected
+// so the command must resolve plugin root + data dir purely from install.json.
+// This is the configuration the old harness could never reach because it always
+// injected both env vars (dev_docs/14 §五 "未被影响" / §10.5.6).
+export function runCommandBlockEnvBlind(commandName, { home, blockIndex = 0, env = {} } = {}) {
+  const blocks = commandBashBlocks(commandName)
+  const script = blocks[blockIndex]
+  if (!script) throw new Error(`no bash block #${blockIndex} in ${commandName}.md`)
+  const stripped = { ...process.env }
+  delete stripped.CLAUDE_PLUGIN_ROOT
+  delete stripped.CLAUDE_PLUGIN_DATA
+  const res = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    cwd: os.tmpdir(),
+    env: { ...stripped, HOME: home, ARGUMENTS: '', ...env },
   })
   return { status: res.status, stdout: res.stdout || '', stderr: res.stderr || '' }
 }

@@ -10,9 +10,9 @@ import {
   recordApiSuccess,
   drainWarning,
 } from './lib/api.mjs'
-import { redact } from './lib/privacy.mjs'
-import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx } from './lib/prompts.mjs'
+import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx, buildResponseLanguageCtx } from './lib/prompts.mjs'
 import { debugLog } from './lib/debug.mjs'
+import { writeInstallPointer } from './lib/paths.mjs'
 
 function readStdin() {
   try {
@@ -36,13 +36,15 @@ function buildAdditionalContext(result, detection, config) {
   const lang = result.detected_input_language || detection.lang
   const execPrompt = result.execution_prompt_en
   const summaryCtx = buildSummaryLanguageCtx(config)
+  const responseLangCtx = buildResponseLanguageCtx(config)
   if (config.execution_mode === 'english_optimized' || config.execution_mode === 'preview') {
     return (
       `CANONICAL REQUEST: The user's message is in ${lang}. ` +
       `They have configured My Lingo to optimize prompts to English. ` +
       `Treat the following as their actual request and ignore the language of their original message:\n\n` +
       execPrompt +
-      summaryCtx
+      summaryCtx +
+      responseLangCtx
     )
   }
   if (config.execution_mode === 'original_with_english_context') {
@@ -51,21 +53,28 @@ function buildAdditionalContext(result, detection, config) {
       `The user's original message may be in ${lang}. ` +
       `Here is an English version for reference:\n\n` +
       execPrompt +
-      summaryCtx
+      summaryCtx +
+      responseLangCtx
     )
   }
-  return execPrompt + summaryCtx
+  return execPrompt + summaryCtx + responseLangCtx
 }
 
-function buildSystemMessage(result, detection, latencyMs) {
+function buildSystemMessage(result, detection, latencyMs, config) {
   const effectiveLang = result.detected_input_language || detection.lang
   const langLabel = effectiveLang === 'en' ? 'refined' : `${effectiveLang}→en`
   const execPrompt = result.execution_prompt_en
-  const truncated = execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt
-  return `[my-lingo] ${langLabel} (${latencyMs}ms): ${truncated}`
+  const display = config?.display_mode === 'full'
+    ? execPrompt
+    : (execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt)
+  return `[my-lingo] ${langLabel} (${latencyMs}ms): ${display}`
 }
 
 function main() {
+  // Refresh the install pointer so env-blind slash commands can locate the
+  // plugin root + data dir (dev_docs/14 §六-F). Atomic + skip-if-unchanged.
+  writeInstallPointer()
+
   const input = readStdin()
   const rawPrompt = (input.prompt || '').trim()
   const cwd = input.cwd || process.cwd()
@@ -121,6 +130,7 @@ function main() {
 
   // Prompt length guard
   if (!isRefine && [...text].length > (config.max_prompt_length || 4000)) {
+    debugLog('TOO_LONG', { length: [...text].length, max: config.max_prompt_length || 4000 }, config)
     try {
       writeTurn({
         prompt: text,
@@ -137,6 +147,7 @@ function main() {
 
   // original mode: record and pass through without API call
   if (!isRefine && config.execution_mode === 'original') {
+    debugLog('ORIGINAL_MODE', { preview: text.slice(0, 80) }, config)
     try {
       writeTurn({
         prompt: text,
@@ -155,14 +166,16 @@ function main() {
       emit({ decision: 'block', reason: 'Nothing to refine. Provide text after ::.' })
       return
     }
-    const redacted = redact(text, config.privacy_mode)
-    const result = callFastModel(buildRefineMessages(redacted, config), config)
+    // Redaction now happens at the API boundary (callFastModel), so every
+    // outbound path is covered uniformly — pass the raw text through.
+    const result = callFastModel(buildRefineMessages(text, config), config)
     if (!result) {
       recordApiFailure(config)
       emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
       return
     }
     recordApiSuccess(config)
+    debugLog('REFINE_RESULT', { preview: (result.execution_prompt_en || '').slice(0, 200) }, config)
     try {
       writeTurn({
         prompt: text,
@@ -174,15 +187,20 @@ function main() {
       }, config)
     } catch {}
     const ctx = `IMPORTANT: The user used :: to request prompt refinement. Their refined intent is: ${result.execution_prompt_en}. Follow this refined prompt as the user's actual request.`
-    emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${(result.execution_prompt_en || '').slice(0, 150)}` })
+    const refinedDisplay = config?.display_mode === 'full'
+      ? result.execution_prompt_en || ''
+      : (result.execution_prompt_en || '').slice(0, 150)
+    emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${refinedDisplay}` })
     return
   }
 
   // ⑥ Main optimization path
   const detection = detectLanguage(text)
+  debugLog('DETECT', { lang: detection.lang, ratio: detection.ratio }, config)
 
   // Circuit breaker check
-  if (checkCircuitBreaker()) {
+  if (checkCircuitBreaker(config)) {
+    debugLog('CIRCUIT_OPEN', { fallback_policy: config.fallback_policy }, config)
     try {
       writeTurn({
         prompt: text,
@@ -199,9 +217,8 @@ function main() {
     return
   }
 
-  const redacted = redact(text, config.privacy_mode)
   const startTime = Date.now()
-  const result = callFastModel(buildOptimizationMessages(redacted, detection, config), config)
+  const result = callFastModel(buildOptimizationMessages(text, detection, config), config)
   const latencyMs = Date.now() - startTime
 
   if (!result) {
@@ -246,7 +263,13 @@ function main() {
   } catch {}
 
   const additionalContext = buildAdditionalContext(result, detection, config)
-  const systemMessage = buildSystemMessage(result, detection, latencyMs)
+  const systemMessage = buildSystemMessage(result, detection, latencyMs, config)
+  debugLog('EMIT', {
+    has_additional_context: Boolean(additionalContext),
+    system_message: systemMessage,
+    latency_ms: latencyMs,
+    rewrite_type: result.rewrite_type,
+  }, config)
   emit({ additionalContext, systemMessage })
 }
 

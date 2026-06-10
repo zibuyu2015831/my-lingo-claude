@@ -61,8 +61,12 @@ export function buildRefineMessages(prompt, config) {
 }
 
 // Builds a trailing instruction for Claude to append a native-language summary.
-// Returns empty string when not applicable (lang is 'en' or not configured).
+// OFF by default — only emits when summary_language_mode === 'native' (explicit
+// opt-in, mirroring response_language_mode). Previously this was unconditionally
+// on for any non-English native language, silently appending a summary request to
+// every single turn. See ARCHITECTURE_REVIEW F6 / D-E.
 export function buildSummaryLanguageCtx(config) {
+  if (config?.summary_language_mode !== 'native') return ''
   const lang = config.summary_language || config.native_language
   if (!lang || lang === 'en') return ''
   return `\n\nAfter your response, append a brief summary in ${lang} (2-3 sentences) so the user can quickly grasp the key points in their native language.`

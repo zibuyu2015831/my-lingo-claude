@@ -133,28 +133,34 @@ test('parseModelResponse: null on non-null error', () => {
 
 // ── buildSummaryLanguageCtx ─────────────────────────────────────────────────
 
+test('buildSummaryLanguageCtx: OFF by default — empty even with a non-en native language', () => {
+  // summary_language_mode unset → default off, no summary appended
+  assert.equal(buildSummaryLanguageCtx({ native_language: 'zh-CN' }), '')
+  assert.equal(buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language_mode: 'off' }), '')
+})
+
 test('buildSummaryLanguageCtx: returns empty string when no native_language', () => {
-  assert.equal(buildSummaryLanguageCtx({}), '')
+  assert.equal(buildSummaryLanguageCtx({ summary_language_mode: 'native' }), '')
 })
 
 test('buildSummaryLanguageCtx: returns empty string for native_language = en', () => {
-  assert.equal(buildSummaryLanguageCtx({ native_language: 'en' }), '')
+  assert.equal(buildSummaryLanguageCtx({ summary_language_mode: 'native', native_language: 'en' }), '')
 })
 
-test('buildSummaryLanguageCtx: returns instruction for zh-CN', () => {
-  const ctx = buildSummaryLanguageCtx({ native_language: 'zh-CN' })
+test('buildSummaryLanguageCtx: returns instruction for zh-CN when mode=native', () => {
+  const ctx = buildSummaryLanguageCtx({ summary_language_mode: 'native', native_language: 'zh-CN' })
   assert.ok(ctx.includes('zh-CN'))
   assert.ok(ctx.includes('summary'))
 })
 
 test('buildSummaryLanguageCtx: summary_language takes priority over native_language', () => {
-  const ctx = buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language: 'ja' })
+  const ctx = buildSummaryLanguageCtx({ summary_language_mode: 'native', native_language: 'zh-CN', summary_language: 'ja' })
   assert.ok(ctx.includes('ja'))
   assert.ok(!ctx.includes('zh-CN'))
 })
 
 test('buildSummaryLanguageCtx: returns empty string when summary_language = en', () => {
-  assert.equal(buildSummaryLanguageCtx({ native_language: 'zh-CN', summary_language: 'en' }), '')
+  assert.equal(buildSummaryLanguageCtx({ summary_language_mode: 'native', native_language: 'zh-CN', summary_language: 'en' }), '')
 })
 
 // ── buildResponseLanguageCtx ────────────────────────────────────────────────

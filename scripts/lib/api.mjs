@@ -53,9 +53,14 @@ export function callFastModel(payload, config) {
   // Single outbound chokepoint: scrub secrets from every message before they
   // leave the machine (ARCHITECTURE_REVIEW F2 / D-A).
   const messages = redactMessages(payload.messages, config.privacy_mode)
+  // Scale the output budget to the input: a fixed 512 truncated long prompts,
+  // producing invalid JSON that parsed to null → needless fallback (F7).
+  const inputChars = messages.reduce(
+    (sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0)
+  const maxTokens = Math.min(2048, Math.max(512, Math.ceil(inputChars / 2) + 256))
   const body = JSON.stringify({
     model: config.model_fast,
-    max_tokens: 512,
+    max_tokens: maxTokens,
     response_format: { type: 'json_object' },
     messages,
   })

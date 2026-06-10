@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
   display_mode: 'compact',
   target_language: 'en',
   response_language_mode: 'off',
+  summary_language_mode: 'off', // 'off' | 'native' — append a native-language summary to each reply
 }
 
 const DEFAULT_SPACE = {

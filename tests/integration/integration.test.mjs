@@ -450,7 +450,7 @@ test('PT-013: data commands run from a foreign cwd and render seeded data', () =
 
     // [command, substring that only appears when seeded data was actually read]
     const cases = [
-      ['status', 'Total turns:  1'],
+      ['info', 'Total turns:  1'],
       ['recent', 'helo wrld'],
       ['last', 'Hello world'],
       ['errors', 'hello world'],
@@ -502,7 +502,7 @@ test('PT-015: data commands resolve via install.json pointer with NO plugin env 
     writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir })
 
     const cases = [
-      ['status', 'Total turns:  1'],
+      ['info', 'Total turns:  1'],
       ['recent', 'helo wrld'],
       ['last', 'Hello world'],
       ['vocab', 'kick off'],
@@ -534,8 +534,8 @@ test('PT-016: a read command with a resolvable plugin but no data dir fails loud
     // mimicking "hook never recorded the real data dir". getDataDir() must throw
     // a clear error instead of silently falling back to a phantom "0 turns" dir.
     writeInstallPointerAt(home, { pluginRoot: ROOT, dataDir: undefined })
-    const r = runCommandBlockEnvBlind('status', { home })
-    assert.notEqual(r.status, 0, `/status should fail (non-zero) when the data dir is unresolvable. stdout:\n${r.stdout}`)
+    const r = runCommandBlockEnvBlind('info', { home })
+    assert.notEqual(r.status, 0, `/info should fail (non-zero) when the data dir is unresolvable. stdout:\n${r.stdout}`)
     assert.ok(
       /data dir unresolved/.test(r.stderr) || /data dir unresolved/.test(r.stdout),
       `error should explain how to recover. stdout:\n${r.stdout}\nstderr:\n${r.stderr}`,

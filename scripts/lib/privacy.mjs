@@ -51,3 +51,18 @@ export function redact(text, privacyMode = 'standard') {
   }
   return result
 }
+
+// Redact every string `content` in a chat-completions `messages` array. This is
+// the single outbound chokepoint: callFastModel / callDeepModel apply it right
+// before curl, so EVERY external request is scrubbed — including the SessionEnd
+// analysis and lesson paths, which read raw prompts back out of SQLite. Keeping
+// redaction at the API boundary (not at each call site) means a newly added API
+// path is protected by default. See dev_docs/14 / ARCHITECTURE_REVIEW F2.
+export function redactMessages(messages, privacyMode = 'standard') {
+  if (privacyMode === 'off' || !Array.isArray(messages)) return messages
+  return messages.map(m =>
+    m && typeof m.content === 'string'
+      ? { ...m, content: redact(m.content, privacyMode) }
+      : m
+  )
+}

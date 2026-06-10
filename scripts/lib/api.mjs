@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getDataDir } from './storage.mjs'
 import { debugLog } from './debug.mjs'
+import { redactMessages } from './privacy.mjs'
 
 const CIRCUIT_THRESHOLD = 3
 const COOLDOWN_MINUTES = 5
@@ -49,17 +50,20 @@ export function callFastModel(payload, config) {
   }
 
   const timeoutSec = config.timeout_seconds || 8
+  // Single outbound chokepoint: scrub secrets from every message before they
+  // leave the machine (ARCHITECTURE_REVIEW F2 / D-A).
+  const messages = redactMessages(payload.messages, config.privacy_mode)
   const body = JSON.stringify({
     model: config.model_fast,
     max_tokens: 512,
     response_format: { type: 'json_object' },
-    messages: payload.messages,
+    messages,
   })
 
   debugLog('API_REQUEST', {
     url: `${config.api_base_url}/chat/completions`,
     model: config.model_fast,
-    messages: payload.messages,
+    messages,
   }, config)
 
   const result = spawnSync('curl', [

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { getApiKey } from './api.mjs'
+import { redactMessages } from './privacy.mjs'
 
 // responses: optional array of { text, word_count } from Stop hook (Claude's replies)
 export function buildAnalysisMessages(turns, config, responses = []) {
@@ -85,10 +86,12 @@ export function callDeepModel(payload, config, opts = {}) {
   const model = config.model_deep || config.model_fast
   if (!model) return null
 
+  // SessionEnd analysis & lesson generation read RAW prompts back out of SQLite,
+  // so this boundary redaction is what protects them (ARCHITECTURE_REVIEW F2/D-A).
   const bodyObj = {
     model,
     max_tokens: 1024,
-    messages: payload.messages,
+    messages: redactMessages(payload.messages, config.privacy_mode),
   }
   if (jsonMode) {
     bodyObj.response_format = { type: 'json_object' }

@@ -10,7 +10,6 @@ import {
   recordApiSuccess,
   drainWarning,
 } from './lib/api.mjs'
-import { redact } from './lib/privacy.mjs'
 import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx, buildResponseLanguageCtx } from './lib/prompts.mjs'
 import { debugLog } from './lib/debug.mjs'
 import { writeInstallPointer } from './lib/paths.mjs'
@@ -167,8 +166,9 @@ function main() {
       emit({ decision: 'block', reason: 'Nothing to refine. Provide text after ::.' })
       return
     }
-    const redacted = redact(text, config.privacy_mode)
-    const result = callFastModel(buildRefineMessages(redacted, config), config)
+    // Redaction now happens at the API boundary (callFastModel), so every
+    // outbound path is covered uniformly — pass the raw text through.
+    const result = callFastModel(buildRefineMessages(text, config), config)
     if (!result) {
       recordApiFailure(config)
       emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
@@ -217,9 +217,8 @@ function main() {
     return
   }
 
-  const redacted = redact(text, config.privacy_mode)
   const startTime = Date.now()
-  const result = callFastModel(buildOptimizationMessages(redacted, detection, config), config)
+  const result = callFastModel(buildOptimizationMessages(text, detection, config), config)
   const latencyMs = Date.now() - startTime
 
   if (!result) {

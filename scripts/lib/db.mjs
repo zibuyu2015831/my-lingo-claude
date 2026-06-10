@@ -16,6 +16,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getDataDir } from './paths.mjs'
 
+// Bump when initSchema changes (and add a migration). Used as a PRAGMA
+// user_version gate so already-initialized DBs skip the CREATE statements.
+const SCHEMA_VERSION = 1
+
 let _db = null
 let _warnedUnavailable = false
 
@@ -50,7 +54,13 @@ export function getDb() {
     _db.exec('PRAGMA synchronous=NORMAL') // safe + faster under WAL
     // (no foreign_keys pragma: the schema declares no FK constraints, so it would
     //  be a no-op that misleadingly implies referential enforcement.)
-    initSchema(_db)
+    // Skip the 5×CREATE+indexes on every prompt once the DB is initialized; the
+    // UserPromptSubmit hook is on a latency budget and runs this per turn (F12).
+    const ver = _db.prepare('PRAGMA user_version').get()?.user_version ?? 0
+    if (ver < SCHEMA_VERSION) {
+      initSchema(_db)
+      _db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+    }
     try { fs.chmodSync(dbPath, 0o600) } catch {} // match the 0o600 file convention, best-effort
     return _db
   } catch (err) {

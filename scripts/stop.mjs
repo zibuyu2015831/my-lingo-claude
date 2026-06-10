@@ -10,10 +10,12 @@ import { debugLog } from './lib/debug.mjs'
 import { writeInstallPointer } from './lib/paths.mjs'
 
 // Derive Claude Code transcript path from cwd + sessionId.
-// Formula confirmed experimentally: replace all / and _ with -
+// Claude Code maps EVERY non-alphanumeric char in the project path to '-' (not
+// just '/' and '_'), so a cwd containing '.', ' ', '@', etc. must be handled too
+// — otherwise the path misses and response capture silently fails (F8).
 // e.g. /data/zibuyu/my_lingo_claude → -data-zibuyu-my-lingo-claude
 export function transcriptPath(cwd, sessionId) {
-  const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+  const hash = cwd.replace(/[^a-zA-Z0-9]/g, '-')
   return path.join(os.homedir(), '.claude', 'projects', hash, `${sessionId}.jsonl`)
 }
 

@@ -196,7 +196,7 @@ function main() {
 
   // ⑥ Main optimization path
   const detection = detectLanguage(text)
-  debugLog('DETECT', { lang: detection.lang, score: detection.score, method: detection.method }, config)
+  debugLog('DETECT', { lang: detection.lang, ratio: detection.ratio }, config)
 
   // Circuit breaker check
   if (checkCircuitBreaker(config)) {

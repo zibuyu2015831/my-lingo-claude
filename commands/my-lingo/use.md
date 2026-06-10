@@ -31,7 +31,7 @@ const spaces = loadSpaces();
 if (!spaces.spaces[key]) {
   console.error('[my-lingo] Space not found: ' + key);
   console.error('Available spaces: ' + Object.keys(spaces.spaces).join(', '));
-  console.error('Create a new space first by adding it to spaces.json.');
+  console.error('Create a new space with: /my-lingo:addspace ' + key + ' <target_language>');
   process.exit(1);
 }
 
@@ -42,4 +42,4 @@ console.log('  Target language: ' + (spaces.spaces[key].target_language || 'en')
 " "$SPACE_KEY"
 ```
 
-If the space is not found, show the available spaces and suggest the user create a new one.
+If the space is not found, show the available spaces and suggest creating one with `/my-lingo:addspace <key> <target_language>`.

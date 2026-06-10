@@ -43,6 +43,8 @@ spaceKeys.forEach(key => {
   console.log('    Turns: ' + (turnCounts[key] || 0) + ' | Corrections: ' + (corrCounts[key] || 0));
   console.log('');
 });
-console.log('Switch spaces with: /my-lingo:use <space-key>');
+console.log('Create a space with: /my-lingo:addspace <key> [target_language]');
+console.log('Switch spaces with:  /my-lingo:use <space-key>');
+console.log('Remove a space with: /my-lingo:rmspace <key>');
 "
 ```

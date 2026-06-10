@@ -58,9 +58,9 @@ test('PT-004: -- prefix — skips optimization, emits [my-lingo] --:', () => {
   }
 })
 
-// ── PT-002: Circuit breaker opens after first API failure ────────────────────
+// ── PT-002: Circuit breaker trips only after 3 consecutive failures (D4) ──────
 
-test('PT-002: circuit breaker — first failure gives "API unavailable", second gives "Circuit breaker open"', () => {
+test('PT-002: circuit breaker — transient failures retry; opens only after the 3rd', () => {
   const dataDir = makeTmpDir()
   try {
     // Port 1 causes immediate connection refused — no waiting for timeout
@@ -68,22 +68,27 @@ test('PT-002: circuit breaker — first failure gives "API unavailable", second 
     const prompt = '请帮我检查这段代码有没有问题'
     const credEnv = { MY_LINGO_API_BASE_URL: 'http://127.0.0.1:1', MY_LINGO_MODEL_FAST: 'test' }
 
-    // Attempt 1: circuit closed → API fails → "API unavailable"
-    const r1 = runHookSync(prompt, { dataDir, env: credEnv })
-    assert.equal(r1.status, 0, 'attempt 1 exits 0')
-    assert.ok(r1.json?.systemMessage?.includes('API unavailable'),
-      `attempt 1 should say "API unavailable", got: ${r1.json?.systemMessage}`)
+    // Attempts 1 & 2: a single/double transient blip must NOT pause the API —
+    // each still attempts the call and reports "API unavailable".
+    for (const attempt of [1, 2]) {
+      const r = runHookSync(prompt, { dataDir, env: credEnv })
+      assert.equal(r.status, 0, `attempt ${attempt} exits 0`)
+      assert.ok(r.json?.systemMessage?.includes('API unavailable'),
+        `attempt ${attempt} should say "API unavailable", got: ${r.json?.systemMessage}`)
+      assert.equal(readCircuitJson(dataDir).failure_count, attempt, `failure_count after attempt ${attempt}`)
+    }
 
-    // circuit.json should now exist
-    assert.ok(circuitJsonExists(dataDir), 'circuit.json created after first failure')
-    const c = readCircuitJson(dataDir)
-    assert.equal(c.failure_count, 1)
+    // Attempt 3: the 3rd consecutive failure trips the breaker.
+    const r3 = runHookSync(prompt, { dataDir, env: credEnv })
+    assert.equal(readCircuitJson(dataDir).failure_count, 3)
+    assert.ok(r3.json?.systemMessage?.includes('tripped'),
+      `attempt 3 should announce the breaker tripped, got: ${r3.json?.systemMessage}`)
 
-    // Attempt 2: circuit open (recent failure) → "Circuit breaker open"
-    const r2 = runHookSync(prompt, { dataDir, env: credEnv })
-    assert.equal(r2.status, 0, 'attempt 2 exits 0')
-    assert.ok(r2.json?.systemMessage?.includes('Circuit breaker open'),
-      `attempt 2 should say "Circuit breaker open", got: ${r2.json?.systemMessage}`)
+    // Attempt 4: breaker now OPEN → API skipped → "Circuit breaker open".
+    const r4 = runHookSync(prompt, { dataDir, env: credEnv })
+    assert.equal(r4.status, 0, 'attempt 4 exits 0')
+    assert.ok(r4.json?.systemMessage?.includes('Circuit breaker open'),
+      `attempt 4 should say "Circuit breaker open", got: ${r4.json?.systemMessage}`)
   } finally {
     cleanup(dataDir)
   }

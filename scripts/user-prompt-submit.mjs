@@ -199,7 +199,7 @@ function main() {
   debugLog('DETECT', { lang: detection.lang, score: detection.score, method: detection.method }, config)
 
   // Circuit breaker check
-  if (checkCircuitBreaker()) {
+  if (checkCircuitBreaker(config)) {
     debugLog('CIRCUIT_OPEN', { fallback_policy: config.fallback_policy }, config)
     try {
       writeTurn({

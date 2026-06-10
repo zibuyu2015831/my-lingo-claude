@@ -17,21 +17,46 @@ import path from 'node:path'
 import { getDataDir } from './paths.mjs'
 
 let _db = null
+let _warnedUnavailable = false
+
+// Surface a backend-unavailable failure ONCE on stderr. Without this, every
+// storage helper's catch{} swallows the cause and the plugin silently records
+// nothing — exactly the "quiet wrong" failure class the data-dir rewrite set out
+// to eliminate. Storage helpers still degrade gracefully; this just makes the
+// root cause visible. See ARCHITECTURE_REVIEW F5 / D-D.
+function warnUnavailableOnce(err) {
+  if (_warnedUnavailable) return
+  _warnedUnavailable = true
+  try {
+    process.stderr.write(
+      `[my-lingo] SQLite backend unavailable (needs Node >= 22.5 with node:sqlite): ` +
+      `${err?.message ?? err}\n`,
+    )
+  } catch {}
+}
 
 export function getDb() {
   if (_db) return _db
+  // getDataDir() raises its own clear, distinct error if the data dir is
+  // unresolved (commands surface it as a loud non-zero exit) — keep it OUT of
+  // the try below so it is not mislabeled as a SQLite failure.
   const dir = getDataDir()
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) // DatabaseSync requires parent dir to exist
-  const dbPath = path.join(dir, 'data.db')
-  _db = new DatabaseSync(dbPath)
-  _db.exec('PRAGMA journal_mode=WAL')   // multi-process: concurrent readers + one writer
-  _db.exec('PRAGMA busy_timeout=3000')  // wait up to 3s on write contention before SQLITE_BUSY
-  _db.exec('PRAGMA synchronous=NORMAL') // safe + faster under WAL
-  // (no foreign_keys pragma: the schema declares no FK constraints, so it would
-  //  be a no-op that misleadingly implies referential enforcement.)
-  initSchema(_db)
-  try { fs.chmodSync(dbPath, 0o600) } catch {} // match the 0o600 file convention, best-effort
-  return _db
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) // DatabaseSync requires parent dir to exist
+    const dbPath = path.join(dir, 'data.db')
+    _db = new DatabaseSync(dbPath)
+    _db.exec('PRAGMA journal_mode=WAL')   // multi-process: concurrent readers + one writer
+    _db.exec('PRAGMA busy_timeout=3000')  // wait up to 3s on write contention before SQLITE_BUSY
+    _db.exec('PRAGMA synchronous=NORMAL') // safe + faster under WAL
+    // (no foreign_keys pragma: the schema declares no FK constraints, so it would
+    //  be a no-op that misleadingly implies referential enforcement.)
+    initSchema(_db)
+    try { fs.chmodSync(dbPath, 0o600) } catch {} // match the 0o600 file convention, best-effort
+    return _db
+  } catch (err) {
+    warnUnavailableOnce(err)
+    throw err
+  }
 }
 
 // Close and clear the singleton. Unit tests switch CLAUDE_PLUGIN_DATA between

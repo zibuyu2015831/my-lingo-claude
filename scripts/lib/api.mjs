@@ -98,7 +98,10 @@ function circuitFile() {
   return path.join(getDataDir(), 'circuit.json')
 }
 
-export function checkCircuitBreaker() {
+// The breaker is OPEN only after CIRCUIT_THRESHOLD consecutive failures (D4):
+// a single transient blip must NOT pause optimization. Once tripped, it stays
+// open for the cooldown window, then auto-resets. Cooldown is configurable.
+export function checkCircuitBreaker(config) {
   const file = circuitFile()
   let circuit
   try {
@@ -107,11 +110,15 @@ export function checkCircuitBreaker() {
   } catch {
     return false
   }
-  const cooldownMs = COOLDOWN_MINUTES * 60 * 1000
-  if (Date.now() - circuit.last_failure_at < cooldownMs) return true
-  // cooldown expired — auto-reset
-  try { fs.unlinkSync(file) } catch {}
-  return false
+  const cooldownMin = config?.circuit_breaker_cooldown_minutes ?? COOLDOWN_MINUTES
+  const cooldownMs = cooldownMin * 60 * 1000
+  if (Date.now() - (circuit.last_failure_at || 0) >= cooldownMs) {
+    // cooldown expired — auto-reset regardless of accumulated count
+    try { fs.unlinkSync(file) } catch {}
+    return false
+  }
+  // within cooldown: open only once enough failures have stacked up
+  return (circuit.failure_count || 0) >= CIRCUIT_THRESHOLD
 }
 
 export function recordApiFailure(config) {

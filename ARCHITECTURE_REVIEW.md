@@ -9,6 +9,29 @@
 
 ---
 
+## 修复落地状态（2026-06-11 复盘）
+
+下表为审查后**全部修复的落地结果**。每项均配套测试并已分阶段 commit；修复后基线 **241 单元 + 14 集成全绿**。
+
+| 项 | 严重度 | 状态 | 落地说明 |
+|----|--------|------|----------|
+| F1 集成测试红（status→info） | 🔴 | ✅ 已修复 | PT-013/015/016 改指向 `info`；集成回到 14/14 |
+| F2 分析/lesson 脱敏泄露 | 🔴 | ✅ 已修复 | 新增 `redactMessages`，下沉到 `callFastModel`/`callDeepModel` 出站边界；删除调用方散点 redact；+4 测试 |
+| F3 多空间不可达 | 🔴 | ✅ 已修复 | 新增 `/my-lingo:addspace`、`/my-lingo:rmspace`；修正 `use.md`/`spaces.md` 引导；端到端验证 |
+| F4 熔断器单次即熔断 | 🟠 | ✅ 已修复 | `checkCircuitBreaker(config)` 改为 `failure_count>=阈值` 才打开、读 config 冷却、到期自复位；PT-002 重写为 3 连击语义 |
+| F5 SQLite 失败静默 | 🟠 | ✅ 已修复 | `getDb()` 失败一次性 stderr 告警后再抛；与 `getDataDir` 的"未解析"错误区分 |
+| F6 默认无条件母语摘要 | 🟠 | ✅ 已修复 | 引入 `summary_language_mode`（默认 `off`），与 `response_language_mode` 对称；测试更新 |
+| F7 max_tokens 截断 | 🟠 | ✅ 已修复 | 输出预算随输入规模动态放大（512–2048） |
+| F8 transcript 路径仅处理 `/_` | 🟡 | ✅ 已修复 | 改为 `[^a-zA-Z0-9]→-`，对齐 Claude Code 真实规则；+1 测试 |
+| F9 debug 记录不存在字段 | 🟡 | ✅ 已修复 | `DETECT` 改记 `detection.ratio` |
+| F12 每轮重跑建表 | 🟡 | ✅ 已修复 | `PRAGMA user_version` 短路 initSchema |
+| F10 node:sqlite 可移植性 | 🟡 | 🟢 已缓解 | 实测本机 Node 22.22 免 flag 可用；**靠 F5 让不兼容环境响亮失败**；保留 `engines>=22.5.0`，未硬改版本 |
+| F11 curl argv 凭证 / slash 注入面 | 🟡 | ⚪ 接受 | 个人本地工具语境，已记录；slash 命令均经 `"$VAR"` argv 安全传参，不改以免引入风险 |
+
+> 下文 §一～§三 为**审查当时**的原始记录，保留作为问题溯源与设计依据，不再随修复改写。
+
+---
+
 ## 〇、总体评价
 
 **这是一个工程质量明显高于平均水准的小型插件。** 架构分层清晰、对失败面有真实思考、对"不可信 LLM 输出"和"多进程并发"等难点都有针对性处理。下列设计值得肯定并应保留：

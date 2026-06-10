@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.5 已完成**（SQLite 存储迁移；222 单元测试 + 12 集成测试通过）|
+| 当前阶段 | **v0.5 + 架构审查修复轮**（见根目录 `ARCHITECTURE_REVIEW.md`）；**241 单元 + 14 集成测试通过** |
 
 ---
 
@@ -198,7 +198,7 @@ Claude 会话结束
 
 ## 实现状态（v0.5 完成）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）；222 单元测试 + 12 集成测试通过**
+当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，`ARCHITECTURE_REVIEW.md`）；241 单元测试 + 14 集成测试通过**
 
 ### v0.1 实现阶段（MVP）
 

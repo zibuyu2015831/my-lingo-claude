@@ -20,7 +20,7 @@ const { loadSpaces } = await import(ROOT + '/scripts/lib/config.mjs');
 const { countTurnsForSpace, countCorrectionsForSpace } = await import(ROOT + '/scripts/lib/storage.mjs');
 
 // Load spaces
-let spaces = { active: 'english', spaces: { english: { key: 'english', display_name: 'English', target_language: 'en', native_language: 'zh-CN', level: 'intermediate', display_mode: 'compact', auto_generate_learning: true } } };
+let spaces = { active: 'english', spaces: { english: { key: 'english', display_name: 'English', target_language: 'en', native_language: 'zh-CN', level: 'intermediate', display_mode: 'full', auto_generate_learning: true } } };
 try { const raw = loadSpaces(); if (raw.active && raw.spaces) spaces = raw; } catch {}
 
 const active = spaces.active || 'english';
@@ -37,7 +37,7 @@ console.log('  Name:            ' + (space.display_name || active));
 console.log('  Target language: ' + (space.target_language || 'en'));
 console.log('  Native language: ' + (space.native_language || 'zh-CN'));
 console.log('  Level:           ' + (space.level || 'intermediate'));
-console.log('  Display mode:    ' + (space.display_mode || 'compact'));
+console.log('  Display mode:    ' + (space.display_mode || 'full'));
 console.log('  Auto learning:   ' + (space.auto_generate_learning !== false ? 'enabled' : 'disabled'));
 console.log('');
 console.log('  Turns recorded:  ' + turnCount);

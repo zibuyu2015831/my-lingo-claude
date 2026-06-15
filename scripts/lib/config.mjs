@@ -14,7 +14,7 @@ const DEFAULT_CONFIG = {
   max_prompt_length: 4000,
   circuit_breaker_cooldown_minutes: 5,
   domain_terms: [],
-  display_mode: 'compact',
+  display_mode: 'full',
   target_language: 'en',
   response_language_mode: 'off',
   summary_language_mode: 'off', // 'off' | 'native' — append a native-language summary to each reply
@@ -26,7 +26,7 @@ const DEFAULT_SPACE = {
   target_language: 'en',
   native_language: 'zh-CN',
   level: 'intermediate',
-  display_mode: 'compact',
+  display_mode: 'full',
   auto_generate_learning: true,
 }
 
@@ -138,7 +138,7 @@ export function addSpace(key, overrides = {}) {
     target_language: 'en',
     native_language: 'zh-CN',
     level: 'intermediate',
-    display_mode: 'compact',
+    display_mode: 'full',
     auto_generate_learning: true,
     created_at: existing.created_at || now,
     ...overrides,

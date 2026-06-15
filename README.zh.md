@@ -179,13 +179,13 @@ API 密钥仅存储在 `config.json` 中，不会写入 git，也不会传输到
 
 ## 执行模式
 
-| 模式 | 行为 |
-|------|------|
-| `english_optimized` | 默认。改写为英文，Claude 收到优化版本。 |
-| `original` | 不改写，但 Prompt 仍被记录，供会话结束后分析。 |
-| `original_with_english_context` | 同时发送原文和英文参考版，Claude 可看到两者。 |
-| `preview` | `english_optimized` 的别名。 |
-| `off` | 完全关闭，不处理也不记录。 |
+| 模式　　　　　　　　　　　　　　| 行为　　　　　　　　　　　　　　　　　　　　　 |
+| ---------------------------------| ------------------------------------------------|
+| `english_optimized`　　　　　　 | 默认。改写为英文，Claude 收到优化版本。　　　　|
+| `original`　　　　　　　　　　　| 不改写，但 Prompt 仍被记录，供会话结束后分析。 |
+| `original_with_english_context` | 同时发送原文和英文参考版，Claude 可看到两者。　|
+| `preview`　　　　　　　　　　　 | `english_optimized` 的别名。　　　　　　　　　 |
+| `off`　　　　　　　　　　　　　 | 完全关闭，不处理也不记录。　　　　　　　　　　 |
 
 通过 `/my-lingo:mode` 切换，或直接编辑 `config.json`。
 

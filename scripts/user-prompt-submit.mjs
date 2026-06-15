@@ -41,7 +41,7 @@ function buildAdditionalContext(result, detection, config) {
     return (
       `CANONICAL REQUEST: The user's message is in ${lang}. ` +
       `They have configured My Lingo to optimize prompts to English. ` +
-      `Treat the following as their actual request and ignore the language of their original message:\n\n` +
+      `Treat the following as their actual request. Disregard only the text language of their original message — still process any attached images, files, or other non-text content:\n\n` +
       execPrompt +
       summaryCtx +
       responseLangCtx
@@ -50,8 +50,8 @@ function buildAdditionalContext(result, detection, config) {
   if (config.execution_mode === 'original_with_english_context') {
     return (
       `[My Lingo English Reference]\n` +
-      `The user's original message may be in ${lang}. ` +
-      `Here is an English version for reference:\n\n` +
+      `The user's original message text may be in ${lang}. ` +
+      `Here is an English version for reference. Process any attached images, files, or other non-text content from the original message as normal:\n\n` +
       execPrompt +
       summaryCtx +
       responseLangCtx
@@ -64,9 +64,9 @@ function buildSystemMessage(result, detection, latencyMs, config) {
   const effectiveLang = result.detected_input_language || detection.lang
   const langLabel = effectiveLang === 'en' ? 'refined' : `${effectiveLang}→en`
   const execPrompt = result.execution_prompt_en
-  const display = config?.display_mode === 'full'
-    ? execPrompt
-    : (execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt)
+  const display = config?.display_mode === 'compact'
+    ? (execPrompt.length > 150 ? execPrompt.slice(0, 150) + '...' : execPrompt)
+    : execPrompt
   return `[my-lingo] ${langLabel} (${latencyMs}ms): ${display}`
 }
 
@@ -187,9 +187,9 @@ function main() {
       }, config)
     } catch {}
     const ctx = `IMPORTANT: The user used :: to request prompt refinement. Their refined intent is: ${result.execution_prompt_en}. Follow this refined prompt as the user's actual request.`
-    const refinedDisplay = config?.display_mode === 'full'
-      ? result.execution_prompt_en || ''
-      : (result.execution_prompt_en || '').slice(0, 150)
+    const refinedDisplay = config?.display_mode === 'compact'
+      ? (result.execution_prompt_en || '').slice(0, 150)
+      : result.execution_prompt_en || ''
     emit({ additionalContext: ctx, systemMessage: `[my-lingo] Refined: ${refinedDisplay}` })
     return
   }

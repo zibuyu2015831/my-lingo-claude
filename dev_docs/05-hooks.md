@@ -1,6 +1,6 @@
 # Hook 实现设计
 
-版本：v0.2
+版本：v0.3（v0.6 新增 SessionStart hook）
 
 ---
 
@@ -23,6 +23,30 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "description": "Catches up unanalyzed turns from previous sessions when a new session starts. Spawns session-end.mjs as a detached background process, exits in < 30ms.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "description": "Captures Claude's text response from the transcript JSONL after each turn. Fast (<200ms), no API calls, always exits 0.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [
@@ -40,8 +64,9 @@
 
 **注意事项**：
 - timeout 设为 60（UserPromptSubmit）允许最坏情况，实际通过脚本内部限制在 8s
-- SessionEnd 替代原设计的 Stop hook（SessionEnd 是正确的会话结束钩子）
-- 不使用 StopFailure hook（MVP 阶段通过 fallback 机制处理）
+- SessionStart（v0.6 新增）：快速退出，真正耗时的分析由 detached 子进程承担，不占用 hook 超时
+- SessionEnd 是主要的分析触发点；SessionStart 是 daemon 模式下的保障机制（见 D15）
+- 不使用 StopFailure hook（通过 fallback 机制处理）
 
 ---
 
@@ -487,15 +512,22 @@ Stop hook **会阻塞**用户输入下一条命令，因此设计约束严格：
   Stop hook 触发（scripts/stop.mjs）
   → 读 ~/.claude/projects/<hash>/<session-id>.jsonl 尾部
   → 提取最新 assistant text（按 sessionId 过滤）
-  → 写 $PLUGIN_DATA/my-lingo/responses/{today}.jsonl
+  → 写 $PLUGIN_DATA/my-lingo/responses（DB responses 表）
   → exit 0（< 200ms）
+
+[新会话启动，v0.6+]
+  SessionStart hook 触发（scripts/session-start.mjs）
+  → 查询 DB：未分析 turns 中属于其他 session 的数量
+  → 数量 > 0 且 analysis.lock 不新鲜 → spawn detached session-end.mjs
+  → exit 0（< 30ms，分析在后台独立进行）
 
 [会话结束]
   SessionEnd hook 触发（scripts/session-end.mjs）
-  → 读 turns/{today}.jsonl（现有）
-  → 读 responses/{today}.jsonl（新增）
-  → 按 session_id 关联，传给 deep model 学习分析
-  → 写 learning/ corrections + items
+  → 读 unanalyzed turns（DB turns 表，analyzed=0）
+  → 读 responses（DB responses 表，按 session_id）
+  → 传给 deep model 学习分析
+  → 单事务：写 corrections/items/sessions + markTurnsAnalyzed
+  → 删除 analysis.lock（若存在）
 ```
 
 ### 5.6 Stop Hook 脚本结构

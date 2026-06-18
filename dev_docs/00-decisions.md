@@ -645,6 +645,48 @@ PostToolUse 在每次工具调用后触发，包含工具输出，但不包含 C
 
 ---
 
+## D15：分析触发保障机制（v0.6）
+
+### 问题
+
+生产环境诊断（2026-06-15）发现：44 条 turns、10 个历史 session，`sessions` 表为空，`analyzed=0` 全部为零。SessionEnd hook 在 Claude Code daemon 模式下**从未触发**。
+
+根本原因：Claude Code 以 daemon 模式长期运行时，`SessionEnd` 仅在 daemon 进程本身退出时触发，而非每次对话窗口关闭。用户日常使用中 daemon 可能连续运行数天，导致学习分析功能完全失效。
+
+### 推荐方案
+
+**两层保障，以 `analysis.lock` 互斥**：
+
+**层 A（主）：SessionStart hook**
+- 新会话启动时触发 `scripts/session-start.mjs`
+- 检查是否有来自其他 session 的未分析 turns（一次 `SELECT COUNT`，< 5ms）
+- 有积压且 lock 不新鲜 → 写 lock → `spawn detached session-end.mjs` → 立即退出
+- 分析进程与 hook 完全解耦，不占用 hook 超时预算
+- hook 总耗时 < 30ms
+
+**层 B（副）：UserPromptSubmit 阈值兜底**
+- 写入 turn 后检查未分析 turns 总数
+- 超过阈值（默认 20）且 lock 不新鲜 → spawn detached 分析进程
+- 覆盖"长时间单 session"场景（SessionStart 已处理历史积压，但当前 session 内仍在积累）
+
+**`analysis.lock` 防并发**：
+- 路径：`$PLUGIN_DATA/my-lingo/analysis.lock`，内含分析进程 PID
+- 新鲜窗口：5 分钟（超时视为进程已死）
+- 分析完成（COMMIT 或 ROLLBACK）后删除 lock
+
+### session-end.mjs 适配
+
+- 分析完成后增加 lock 清理（`unlinkSync analysis.lock`）
+- 识别 `MY_LINGO_CATCHUP=1` 环境变量（由 SessionStart 设置），可在 stderr 统计输出中区分"正常 SessionEnd"和"补偿运行"
+
+### 接受的局限
+
+- 当前 session 的 turns 只能等到下次 SessionStart 或阈值触发才被分析
+- detached spawn 的 stdio 为 `ignore`，分析结果不可见于当前终端
+- 若 daemon 从不重启且每个 session 都不超过阈值，分析永远延迟到下次启动——这是可接受的权衡（vs. 完全失效）
+
+---
+
 ## 总结：核心决策一览
 
 | 决策点 | 原设计 | 推荐方案 |
@@ -661,3 +703,4 @@ PostToolUse 在每次工具调用后触发，包含工具输出，但不包含 C
 | MVP 范围 | 17 项（含多语言空间）| 10 项（单语言空间优先）|
 | 项目命名 | 未定义 | My Lingo / my-lingo / my-lingo-claude（三层分离）|
 | Claude 回复捕获 | 无 | Stop hook + transcript 文件读取，responses/ 缓存 |
+| 分析触发保障 | 仅 SessionEnd（daemon 下失效）| SessionStart hook + UserPromptSubmit 阈值兜底（v0.6）|

@@ -1,6 +1,18 @@
 {
   "description": "My Lingo — prompt optimization and language learning for Claude Code.",
   "hooks": {
+    "SessionStart": [
+      {
+        "description": "Triggers catchup analysis for unanalyzed turns from prior sessions via detached spawn.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "matcher": "*",

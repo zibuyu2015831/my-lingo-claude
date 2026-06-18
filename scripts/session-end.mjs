@@ -12,9 +12,20 @@ import { getDb } from './lib/db.mjs'
 import { loadConfig, loadSpaces, getActiveSpace } from './lib/config.mjs'
 import { buildAnalysisMessages, callDeepModel } from './lib/analysis.mjs'
 import { debugLog } from './lib/debug.mjs'
-import { writeInstallPointer } from './lib/paths.mjs'
+import { writeInstallPointer, getDataDir } from './lib/paths.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+
+function writeLock(dataDir) {
+  try { fs.writeFileSync(path.join(dataDir, 'analysis.lock'), String(process.pid)) } catch {}
+}
+
+function releaseLock(dataDir) {
+  try { fs.unlinkSync(path.join(dataDir, 'analysis.lock')) } catch {}
+}
 
 function main() {
+  let _dataDir
   try {
     writeInstallPointer() // refresh the env-blind command pointer (dev_docs/14 §六-F)
 
@@ -31,6 +42,8 @@ function main() {
       return
     }
     const ids = records.map(r => r.id)
+    _dataDir = getDataDir()
+    writeLock(_dataDir)
 
     const optimized = records.filter(r => r.execution_prompt && !r.fallback)
     const translated = records.filter(
@@ -117,20 +130,24 @@ function main() {
         for (const item of (result?.learning_points ?? [])) {
           writeLearningItem({ ...item, language_space: space }, space)
         }
-        writeSession({
-          session_id: sessionId,
-          language_space: space,
-          total_prompts: records.length,
-          optimized: optimized.length,
-          translated: translated.length,
-          corrected: corrected.length,
-          fallbacks: fallbacks.length,
-          raws: raws.length,
-          top_errors: result?.corrections?.slice(0, 3).map(c => ({
-            pattern: c.pattern ?? c.type,
-            count: 1,
-          })) ?? [],
-        })
+        // Skip in catchup mode (sessionId=null): NULL doesn't trigger REPLACE in
+        // SQLite UNIQUE constraint — every insert would add a new row indefinitely.
+        if (sessionId !== null) {
+          writeSession({
+            session_id: sessionId,
+            language_space: space,
+            total_prompts: records.length,
+            optimized: optimized.length,
+            translated: translated.length,
+            corrected: corrected.length,
+            fallbacks: fallbacks.length,
+            raws: raws.length,
+            top_errors: result?.corrections?.slice(0, 3).map(c => ({
+              pattern: c.pattern ?? c.type,
+              count: 1,
+            })) ?? [],
+          })
+        }
         markTurnsAnalyzed(ids)
         db.exec('COMMIT')
         debugLog('SESSION_COMMIT', { session_id: sessionId }, config)
@@ -145,6 +162,8 @@ function main() {
     debugLog('SESSION_DONE', { session_id: sessionId })
   } catch {
     // never throw — exit 0 always (D2)
+  } finally {
+    if (_dataDir) releaseLock(_dataDir)
   }
 }
 

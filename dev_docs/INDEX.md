@@ -113,6 +113,7 @@ my-lingo-claude/
 | 查看 v0.2 实现计划（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`./development/IMPLEMENTATION_PLAN_V0.2.md`](./development/IMPLEMENTATION_PLAN_V0.2.md) |
 | 查看 v0.3 实现计划（SRS 复习 + 课程生成 + 画像 + 导出）| [`./development/IMPLEMENTATION_PLAN_V0.3.md`](./development/IMPLEMENTATION_PLAN_V0.3.md) |
 | 查看 v0.5 实现计划（SQLite 存储迁移）| [`./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md`](./development/IMPLEMENTATION_PLAN_V0.5_SQLITE.md) |
+| 查看 v0.6 实现计划（分析触发保障机制）| [`./development/IMPLEMENTATION_PLAN_V0.6_ANALYSIS_TRIGGER.md`](./development/IMPLEMENTATION_PLAN_V0.6_ANALYSIS_TRIGGER.md) |
 
 ---
 
@@ -193,12 +194,13 @@ Claude 会话结束
 | D10 脱敏 | 覆盖 API key、DB 密码、用户名路径、私有 IP、AWS key | [00-decisions.md#D10](./00-decisions.md) |
 | D11 命令格式 | `commands/my-lingo/*.md`（不用旧版 `skills/SKILL.md`）| [00-decisions.md#D11](./00-decisions.md) |
 | D12 MVP 范围 | 10 项核心功能，单语言空间（English），多语言 v0.2 | [00-decisions.md#D12](./00-decisions.md) |
+| D15 分析触发保障 | SessionStart hook（主）+ UserPromptSubmit 阈值兜底（副），解决 daemon 模式下 SessionEnd 不触发问题 | [00-decisions.md#D15](./00-decisions.md) |
 
 ---
 
-## 实现状态（v0.5 完成）
+## 实现状态（v0.5 完成，v0.6 待实施）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，`ARCHITECTURE_REVIEW.md`）；241 单元测试 + 14 集成测试通过**
+当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，`ARCHITECTURE_REVIEW.md`）；241 单元测试 + 14 集成测试通过。v0.6（分析触发保障）待实施。**
 
 ### v0.1 实现阶段（MVP）
 
@@ -244,6 +246,17 @@ Claude 会话结束
 | Phase 2.5 | 只读命令 SQLite 化（`status`/`recent`/`last`/`errors`/`space`/`spaces` 由内联 JSONL 读改为 import `storage.mjs`）+ `countTurnsForSpace`/`countCorrectionsForSpace` + 单元测试 | ✅ 已完成 |
 | Phase 3 | 文档更新（`00-decisions.md` D3 / `07-storage.md` / `INDEX.md`）| ✅ 已完成 |
 
+### v0.6 实现阶段（分析触发保障机制）
+
+> 详细设计见 [`./development/IMPLEMENTATION_PLAN_V0.6_ANALYSIS_TRIGGER.md`](./development/IMPLEMENTATION_PLAN_V0.6_ANALYSIS_TRIGGER.md)
+
+**背景**：生产诊断发现 Claude Code daemon 长期运行时 SessionEnd 不触发，导致学习数据永远积压（44 turns、10 sessions、analyzed=0）。
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase 1 | 新增 `scripts/session-start.mjs` + 更新 `hooks/hooks.json`（SessionStart 条目）+ `session-end.mjs` 增加 lock 清理 + 单元测试 + PT-014 集成测试 | 待实施 |
+| Phase 2 | `config.mjs` 新增阈值配置项 + `user-prompt-submit.mjs` 阈值兜底触发 + 补充测试 | 待实施 |
+
 ### MVP 必须实现的功能（10 项）
 
 1. 插件骨架（`plugin.json`、`hooks/hooks.json`、Node.js hook 脚本）
@@ -266,6 +279,7 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 ├── config.json                  # 全局配置（API URL、模型、超时等）
 ├── spaces.json                  # 语言空间配置（active space、各 space 设置）
 ├── circuit.json                 # 熔断器状态（failure_count、last_failure_at）
+├── analysis.lock                # 分析进程互斥锁（v0.6+，内含 PID，5 分钟超时）
 └── data.db                      # SQLite 单库（WAL）：turns / responses /
                                  #   corrections / learning_items / sessions 五张表
                                  #   （运行时伴随 data.db-wal / data.db-shm）

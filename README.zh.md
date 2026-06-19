@@ -66,7 +66,7 @@ My Lingo 同时解决这两件事。
 ## 环境要求
 
 - **Claude Code**（需支持插件功能）
-- **Node.js ≥ 22.5.0**（使用内置 `node:sqlite` 等模块，无需任何 npm 包）
+- **Node.js ≥ 22.13.0**（使用内置 `node:sqlite` 等模块，无需任何 npm 包；`node:sqlite` 从 22.13.0 起才无需 flag）
 - **`curl`** 在系统 PATH 中可用
 - 一个 **OpenAI 兼容的 API Key** — 任意服务商均可：OpenAI、DeepSeek、Groq、本地 Ollama 等
 

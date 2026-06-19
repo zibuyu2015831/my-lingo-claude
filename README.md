@@ -62,7 +62,7 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 ## Requirements
 
 - **Claude Code** (with plugin support)
-- **Node.js ≥ 22.5.0** (uses built-in `node:sqlite`, `node:test`, etc. — no npm packages required)
+- **Node.js ≥ 22.13.0** (uses built-in `node:sqlite`, `node:test`, etc. — no npm packages required; `node:sqlite` only became flag-free in 22.13.0)
 - **`curl`** available in your PATH
 - An **OpenAI-compatible API key** — any provider works: OpenAI, DeepSeek, Groq, a local Ollama instance, etc.
 

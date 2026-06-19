@@ -13,8 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         # Lower bound (engines.node) + current LTS. The plugin uses built-in
-        # node:sqlite / node:test, so the floor matters.
-        node-version: ['22.5.0', '22.x']
+        # node:sqlite / node:test, so the floor matters. node:sqlite only became
+        # flag-free in 22.13.0, so that is the true minimum (not 22.5.0).
+        node-version: ['22.13.0', '22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
 

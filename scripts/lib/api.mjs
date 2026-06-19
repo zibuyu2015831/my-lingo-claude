@@ -71,7 +71,7 @@ export function callFastModel(payload, config) {
 
   const timeoutSec = config.timeout_seconds || 8
   // Single outbound chokepoint: scrub secrets from every message before they
-  // leave the machine (ARCHITECTURE_REVIEW F2 / D-A).
+  // leave the machine (dev_docs/15 F2 / D-A).
   const messages = redactMessages(payload.messages, config.privacy_mode)
   // Scale the output budget to the input: a fixed 512 truncated long prompts,
   // producing invalid JSON that parsed to null → needless fallback (F7).

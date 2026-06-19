@@ -57,7 +57,7 @@ export function redact(text, privacyMode = 'standard') {
 // before curl, so EVERY external request is scrubbed — including the SessionEnd
 // analysis and lesson paths, which read raw prompts back out of SQLite. Keeping
 // redaction at the API boundary (not at each call site) means a newly added API
-// path is protected by default. See dev_docs/14 / ARCHITECTURE_REVIEW F2.
+// path is protected by default. See dev_docs/14 / dev_docs/15 F2.
 export function redactMessages(messages, privacyMode = 'standard') {
   if (privacyMode === 'off' || !Array.isArray(messages)) return messages
   return messages.map(m =>

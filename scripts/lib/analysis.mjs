@@ -91,7 +91,7 @@ export function callDeepModel(payload, config, opts = {}) {
   // config override.
   const maxTokens = opts.maxTokens ?? config.deep_max_tokens ?? 4096
   // SessionEnd analysis & lesson generation read RAW prompts back out of SQLite,
-  // so this boundary redaction is what protects them (ARCHITECTURE_REVIEW F2/D-A).
+  // so this boundary redaction is what protects them (dev_docs/15 F2/D-A).
   const bodyObj = {
     model,
     max_tokens: maxTokens,

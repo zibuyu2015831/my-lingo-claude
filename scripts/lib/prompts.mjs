@@ -64,7 +64,7 @@ export function buildRefineMessages(prompt, config) {
 // OFF by default — only emits when summary_language_mode === 'native' (explicit
 // opt-in, mirroring response_language_mode). Previously this was unconditionally
 // on for any non-English native language, silently appending a summary request to
-// every single turn. See ARCHITECTURE_REVIEW F6 / D-E.
+// every single turn. See dev_docs/15 F6 / D-E.
 export function buildSummaryLanguageCtx(config) {
   if (config?.summary_language_mode !== 'native') return ''
   const lang = config.summary_language || config.native_language

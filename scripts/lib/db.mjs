@@ -27,7 +27,7 @@ let _warnedUnavailable = false
 // storage helper's catch{} swallows the cause and the plugin silently records
 // nothing — exactly the "quiet wrong" failure class the data-dir rewrite set out
 // to eliminate. Storage helpers still degrade gracefully; this just makes the
-// root cause visible. See ARCHITECTURE_REVIEW F5 / D-D.
+// root cause visible. See dev_docs/15 F5 / D-D.
 function warnUnavailableOnce(err) {
   if (_warnedUnavailable) return
   _warnedUnavailable = true

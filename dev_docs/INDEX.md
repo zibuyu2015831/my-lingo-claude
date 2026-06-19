@@ -22,7 +22,7 @@
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
 | Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.5 + 架构审查修复轮**（见根目录 `ARCHITECTURE_REVIEW.md`）；**241 单元 + 14 集成测试通过** |
+| 当前阶段 | **v0.5 + 架构审查修复轮**（见 [`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md)）；**241 单元 + 14 集成测试通过** |
 
 ---
 
@@ -109,6 +109,7 @@ my-lingo-claude/
 | 了解 MVP 范围、实现阶段划分、风险登记、验收清单 | [`10-mvp-roadmap.md`](./10-mvp-roadmap.md) |
 | 查询某个关键架构决策的背景和理由 | [`00-decisions.md`](./00-decisions.md) |
 | 运行集成测试、了解各用例原理、查看与 PENDING_TESTS.md 的差异 | [`11-integration-tests.md`](./11-integration-tests.md) |
+| 回溯 v0.5 架构审查的发现（F1–F12）、更优方案（D-A–D-G）与修复落地状态 | [`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md) |
 | 查看 v0.1 实现计划（MVP 完整阶段）| [`./development/IMPLEMENTATION_PLAN_V0.1.md`](./development/IMPLEMENTATION_PLAN_V0.1.md) |
 | 查看 v0.2 实现计划（多语言空间 + SessionEnd 学习分析 + 学习命令）| [`./development/IMPLEMENTATION_PLAN_V0.2.md`](./development/IMPLEMENTATION_PLAN_V0.2.md) |
 | 查看 v0.3 实现计划（SRS 复习 + 课程生成 + 画像 + 导出）| [`./development/IMPLEMENTATION_PLAN_V0.3.md`](./development/IMPLEMENTATION_PLAN_V0.3.md) |
@@ -200,7 +201,7 @@ Claude 会话结束
 
 ## 实现状态（v0.5 完成，v0.6 待实施）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，`ARCHITECTURE_REVIEW.md`）；241 单元测试 + 14 集成测试通过。v0.6（分析触发保障）待实施。**
+当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，[`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md)）；241 单元测试 + 14 集成测试通过。v0.6（分析触发保障）待实施。**
 
 ### v0.1 实现阶段（MVP）
 

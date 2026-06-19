@@ -10,10 +10,14 @@
 
 Non-native English speakers using Claude Code face two friction points simultaneously:
 
-1. **Prompt quality** — Expressing technical intent in your native language (Chinese, Japanese, etc.) often produces less precise Claude responses than well-formed English prompts.
+1. **Prompt quality** — The same request, written in your native language (Chinese, Japanese, etc.), often gets a less precise response from Claude than a well-formed English prompt would.
 2. **Language learning** — The technical English you need most is exactly the kind you'd find in real coding discussions, not in textbooks.
 
-My Lingo solves both at once. It intercepts every prompt you submit, rewrites it into structured English via an external LLM API, and injects the result transparently before Claude sees it. Your original message is never blocked — if the API is unavailable, your prompt goes through as-is. At the end of each session, My Lingo analyses the rewrites, extracts corrections and vocabulary, and builds up a personal language learning library from your actual interactions.
+My Lingo solves both at once.
+
+Every time you submit a prompt, it rewrites your text into clear, structured English through an external LLM API and hands that version to Claude transparently — you barely notice it happening. Your original message is never blocked: if the API is unavailable, your prompt goes through as-is.
+
+And at the end of each session, My Lingo analyses those rewrites, extracts corrections and vocabulary, and turns your everyday interactions into a personal language-learning library.
 
 **Before / After example:**
 
@@ -141,7 +145,7 @@ Just use Claude Code normally. My Lingo runs silently in the background. After e
 [my-lingo] zh-CN→en (312ms): Review the authentication flow for security issues ...
 ```
 
-That's it — Claude receives the optimized English version, you see the original in your input.
+That's it — Claude works from the optimized English version, while your input box still shows exactly what you typed.
 
 ### Special prefixes
 
@@ -244,11 +248,11 @@ Session-end analysis and lesson generation use the **deep** model (`MY_LINGO_MOD
 | `deep_timeout_seconds` | `55` | Max seconds for a deep-model call before it's abandoned. |
 | `deep_max_tokens` | `4096` | Completion token budget for the deep model. |
 
-The defaults are sized for **slow reasoning models** (e.g. `gemini-2.5-pro`, the o-series), which spend much of their budget on hidden reasoning tokens — a small budget truncates the JSON and silently yields no corrections. Notes:
+These defaults are sized for **slow reasoning models** (e.g. `gemini-2.5-pro`, the o-series): such models spend much of their token budget on hidden reasoning, so too small a budget truncates the JSON output and the analysis silently yields nothing. A few notes:
 
-- `deep_timeout_seconds` **must stay below** the `SessionEnd` hook `timeout` in `hooks/hooks.json` (default `60`). If the analysis is killed by the hook before it commits, those turns are still marked analyzed and their learning data is lost.
-- Prefer a **fast, non-reasoning** deep model (e.g. `deepseek-chat`) if you'd rather keep session-end near-instant — then you can lower both values.
-- The prompt-optimization (**fast** model) path sizes its own token budget automatically and is unaffected.
+- `deep_timeout_seconds` **must stay below** the `SessionEnd` hook `timeout` in `hooks/hooks.json` (default `60`). If the hook kills the analysis before it commits, those turns are still marked as analyzed — and their learning data is lost for good.
+- If you'd rather keep session-end near-instant, switch the deep model to a **fast, non-reasoning** one (e.g. `deepseek-chat`) and lower both values.
+- The prompt-optimization (**fast** model) path sizes its own token budget automatically, so these two settings don't affect it.
 
 ---
 

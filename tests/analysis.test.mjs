@@ -74,6 +74,20 @@ test('parseAnalysisResponse: valid stdout returns { corrections, learning_points
   assert.equal(result.learning_points.length, 1)
 })
 
+test('parseAnalysisResponse: ```json fenced content → parsed (regression: deep model wraps JSON)', () => {
+  // Anthropic/Gemini behind an OpenAI-compatible gateway ignore response_format
+  // and fence the JSON. Previously this parsed to null → zero corrections/items.
+  const inner = JSON.stringify({
+    corrections: [{ type: 'grammar', original: 'have bug', corrected: 'has a bug', explanation: 'x', pattern: 'subject-verb' }],
+    learning_points: [{ type: 'phrase', target_text: 'identify bugs', native_explanation: 'y' }],
+  })
+  const stdout = JSON.stringify({ choices: [{ message: { content: '```json\n' + inner + '\n```' } }] })
+  const result = parseAnalysisResponse(stdout)
+  assert.ok(result !== null, 'fenced JSON should still parse')
+  assert.equal(result.corrections.length, 1)
+  assert.equal(result.learning_points.length, 1)
+})
+
 test('parseAnalysisResponse: garbage string → null, no throw', () => {
   const result = parseAnalysisResponse('not valid json at all !!!%^&')
   assert.equal(result, null)

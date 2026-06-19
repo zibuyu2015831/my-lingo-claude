@@ -23,21 +23,21 @@
 - 环境变量作为最高优先级覆盖层（Layer 0），高于文件配置
 - `/setup` 命令不再收集任何凭证信息，只负责检查和验证
 
-### 2.2 环境变量定义
+### 2.2 凭证来源定义（plugin userConfig 优先，环境变量兜底）
 
-| 环境变量 | 对应字段 | 是否必填 | 示例值 |
-|---------|---------|---------|-------|
-| `MY_LINGO_API_KEY` | `api_key` | 必填 | `sk-...` |
-| `MY_LINGO_API_BASE_URL` | `api_base_url` | 必填 | `https://api.openai.com/v1` |
-| `MY_LINGO_MODEL_FAST` | `model_fast` | 必填 | `gpt-4o-mini` |
-| `MY_LINGO_MODEL_DEEP` | `model_deep` | 选填 | `gpt-4o`（默认等于 model_fast） |
+| 对应字段 | 优先：plugin userConfig（注入形式）| 兜底：环境变量 | 是否必填 | 示例值 |
+|---------|---------|---------|---------|-------|
+| `api_key` | `CLAUDE_PLUGIN_OPTION_API_KEY` | `MY_LINGO_API_KEY` | 必填 | `sk-...` |
+| `api_base_url` | `CLAUDE_PLUGIN_OPTION_API_BASE_URL` | `MY_LINGO_API_BASE_URL` | 必填 | `https://api.openai.com/v1` |
+| `model_fast` | `CLAUDE_PLUGIN_OPTION_MODEL_FAST` | `MY_LINGO_MODEL_FAST` | 必填 | `gpt-4o-mini` |
+| `model_deep` | `CLAUDE_PLUGIN_OPTION_MODEL_DEEP` | `MY_LINGO_MODEL_DEEP` | 选填 | `gpt-4o`（默认等于 model_fast） |
 
-注意：`MY_LINGO_API_KEY` 在 `api.mjs` 的 `getApiKey()` 中已有部分支持，本次统一到 `loadConfig()` 层。
+注意：`api.mjs` 的 `getApiKey()` 只读 `config.api_key`；凭证解析统一在 `loadConfig()` 的 Layer 0（`credValue()`）完成。
 
 ### 2.3 配置优先级（修改后）
 
 ```
-Layer 0 (最高): 环境变量（MY_LINGO_*）
+Layer 0 (最高): 凭证（plugin userConfig CLAUDE_PLUGIN_OPTION_* > 环境变量 MY_LINGO_*）
 Layer 1:        项目级配置 .claude-my-lingo.json
 Layer 2:        语言空间 overrides（spaces.json）
 Layer 3:        全局配置 config.json（不再存储凭证字段）
@@ -53,13 +53,22 @@ Layer 4 (最低): 代码内置默认值
 在 `loadConfig()` 末尾添加 Layer 0 覆盖：
 
 ```js
-// Layer 0 (最高): 环境变量覆盖凭证字段
-const envOverrides = {}
-if (process.env.MY_LINGO_API_KEY)      envOverrides.api_key      = process.env.MY_LINGO_API_KEY
-if (process.env.MY_LINGO_API_BASE_URL) envOverrides.api_base_url = process.env.MY_LINGO_API_BASE_URL
-if (process.env.MY_LINGO_MODEL_FAST)   envOverrides.model_fast   = process.env.MY_LINGO_MODEL_FAST
-if (process.env.MY_LINGO_MODEL_DEEP)   envOverrides.model_deep   = process.env.MY_LINGO_MODEL_DEEP
-if (Object.keys(envOverrides).length) merged = { ...merged, ...envOverrides }
+// Layer 0 (最高): 凭证 —— plugin userConfig 优先，MY_LINGO_* 环境变量兜底
+const cred = (optKey, envKey) => {
+  const v = process.env[optKey]            // CLAUDE_PLUGIN_OPTION_*（userConfig 注入）
+  if (v && v.trim()) return v
+  const e = process.env[envKey]            // MY_LINGO_*（用户手动 export）
+  if (e && e.trim()) return e
+  return undefined
+}
+const api_key      = cred('CLAUDE_PLUGIN_OPTION_API_KEY',      'MY_LINGO_API_KEY')
+const api_base_url = cred('CLAUDE_PLUGIN_OPTION_API_BASE_URL', 'MY_LINGO_API_BASE_URL')
+const model_fast   = cred('CLAUDE_PLUGIN_OPTION_MODEL_FAST',   'MY_LINGO_MODEL_FAST')
+const model_deep   = cred('CLAUDE_PLUGIN_OPTION_MODEL_DEEP',   'MY_LINGO_MODEL_DEEP')
+if (api_key)      merged.api_key      = api_key
+if (api_base_url) merged.api_base_url = api_base_url
+if (model_fast)   merged.model_fast   = model_fast
+if (model_deep)   merged.model_deep   = model_deep
 ```
 
 `writeConfig()` 修改：写入前删除 `api_key`、`api_base_url`、`model_fast`、`model_deep`，防止凭证被持久化到文件：

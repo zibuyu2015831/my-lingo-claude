@@ -117,7 +117,7 @@ test('addSpace: overwrite merges overrides with defaults', () => {
     const s = loadSpaces().spaces.german
     assert.equal(s.target_language, 'de')
     assert.equal(s.level, 'beginner')
-    assert.equal(s.display_mode, 'compact') // default preserved
+    assert.equal(s.display_mode, 'full') // default preserved (DEFAULT_SPACE.display_mode)
   })
 })
 

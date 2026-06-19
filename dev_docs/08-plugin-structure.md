@@ -133,17 +133,14 @@ my-lingo-claude/
 
 **关于 `userConfig` 的重要说明**：
 
-`userConfig` 字段在 Claude Code UI 中展示配置项（让用户了解有哪些选项），但 hook 脚本（独立 Node.js 进程）**不会**自动接收 userConfig 的值作为环境变量。
+Claude Code 会把 plugin.json `userConfig` 的每个字段以 `CLAUDE_PLUGIN_OPTION_<字段大写>` 环境变量注入**插件子进程**（hook 进程即属此类）。因此凭证的运行时解析在 `config.mjs` 的 Layer 0（`credValue()`）完成：
 
-**实际配置流程**：
-1. 用户运行 `/my-lingo:setup` → Claude 通过 `Bash` 工具交互读取用户输入
-2. setup 命令将所有配置写入 `$CLAUDE_PLUGIN_DATA/my-lingo/config.json`（权限 0o600）
-3. hook 脚本在每次触发时读取 `config.json`（而非 userConfig）
+**凭证解析流程（运行时关键路径）**：
+1. hook 进程启动 → `loadConfig()` 读取 `CLAUDE_PLUGIN_OPTION_API_KEY` 等（userConfig 注入值）
+2. 该值为空时回退到用户自行 export 的 `MY_LINGO_API_KEY` 等
+3. 凭证**绝不写入 config.json**（`CREDENTIAL_FIELDS` 在读写时强制过滤）；`/my-lingo:setup` 不收集、不落盘任何凭证
 
-这与参考实现（`claude-english-buddy`）的模式一致：它完全不使用 userConfig，直接读取 `.claude-english-buddy.json` 项目配置文件。
-
-```json
-```
+> ⚠️ **slash command 的边界**：`/my-lingo:setup`、`/my-lingo:info` 的内联 bash 块是 `Bash` 工具子进程，**不一定**能像 hook 那样收到 `CLAUDE_PLUGIN_OPTION_*`（参见 [`14-data-dir-split-investigation.md`](./14-data-dir-split-investigation.md) 对 `CLAUDE_PLUGIN_DATA`/`ROOT` 的实测）。因此这两个命令在展示凭证状态时会优先尝试 `CLAUDE_PLUGIN_OPTION_*`、再回退 `MY_LINGO_*`：若用户仅通过 userConfig 配置且该变量未注入到 slash command，状态可能显示为来自 env 或未设置，但**不影响 hook 的真实运行**。
 
 ---
 
@@ -234,7 +231,8 @@ Output the status in this format:
 | `CLAUDE_PLUGIN_ROOT` | 插件根目录路径 | Claude Code 提供 |
 | `CLAUDE_PLUGIN_DATA` | 插件数据目录路径（默认 `~/.claude/plugins/data/`）| Claude Code 提供 |
 | `CLAUDE_SESSION_ID` | 当前会话 ID（hook 中记录到每条 turn）| Claude Code 提供 |
-| `MY_LINGO_API_KEY` | API key 环境变量覆盖（优先级高于 config.json）| 用户手动设置 |
+| `CLAUDE_PLUGIN_OPTION_API_KEY` 等 | plugin.json userConfig 值的注入形式（凭证最高优先级）| Claude Code 注入 |
+| `MY_LINGO_API_KEY` 等 | 凭证兜底来源（userConfig 未设时生效）| 用户手动 export |
 
 **注意**：`CLAUDE_CODE_USE_BEDROCK` 不适用于 My Lingo——My Lingo 调用的是用户自选的外部 API（OpenAI / DeepSeek 等），不通过 Anthropic Bedrock。
 

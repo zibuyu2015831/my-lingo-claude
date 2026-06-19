@@ -15,6 +15,30 @@ export function getApiKey(config) {
   return config?.api_key ?? null
 }
 
+// Extract a JSON object from a model's message content. Some providers honour
+// response_format:json_object and return bare JSON; others (notably Anthropic
+// models behind OpenAI-compatible gateways) ignore it and wrap the JSON in a
+// ```json … ``` markdown fence, or surround it with prose. Tolerate all three.
+export function extractJsonContent(content) {
+  if (typeof content !== 'string') return null
+  let s = content.trim()
+  // Strip a surrounding markdown code fence: ```json\n…\n``` or ```\n…\n```
+  const fence = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i)
+  if (fence) s = fence[1].trim()
+  try {
+    return JSON.parse(s)
+  } catch {}
+  // Last resort: parse the first balanced { … } span embedded in surrounding text.
+  const first = s.indexOf('{')
+  const last = s.lastIndexOf('}')
+  if (first !== -1 && last > first) {
+    try {
+      return JSON.parse(s.slice(first, last + 1))
+    } catch {}
+  }
+  return null
+}
+
 export function parseModelResponse(stdout) {
   if (!stdout || typeof stdout !== 'string') return null
   let response
@@ -31,11 +55,7 @@ export function parseModelResponse(stdout) {
   }
   const content = response.choices?.[0]?.message?.content
   if (!content) return null
-  try {
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
+  return extractJsonContent(content)
 }
 
 export function callFastModel(payload, config) {

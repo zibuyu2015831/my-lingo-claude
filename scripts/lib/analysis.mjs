@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { getApiKey } from './api.mjs'
+import { getApiKey, extractJsonContent } from './api.mjs'
 import { redactMessages } from './privacy.mjs'
 
 // responses: optional array of { text, word_count } from Stop hook (Claude's replies)
@@ -65,20 +65,18 @@ export function parseAnalysisResponse(stdout) {
   } catch {
     return null
   }
-  let result
-  try {
-    result = JSON.parse(content)
-  } catch {
-    return null
-  }
-  if (!Array.isArray(result.corrections)) return null
+  // Tolerate models that wrap the JSON in a ```json fence or surrounding prose,
+  // not just those that honour response_format and return bare JSON (shared with
+  // api.mjs parseModelResponse).
+  const result = extractJsonContent(content)
+  if (!result || !Array.isArray(result.corrections)) return null
   const learning_points = Array.isArray(result.learning_points) ? result.learning_points : []
   return { corrections: result.corrections, learning_points }
 }
 
 export function callDeepModel(payload, config, opts = {}) {
   const jsonMode = opts.jsonMode !== false
-  const maxTimeSec = opts.maxTimeSeconds ?? 30
+  const maxTimeSec = opts.maxTimeSeconds ?? config?.deep_timeout_seconds ?? 30
   const apiKey = getApiKey(config)
   if (!apiKey) return null
   if (!config || !config.api_base_url) return null
@@ -86,11 +84,17 @@ export function callDeepModel(payload, config, opts = {}) {
   const model = config.model_deep || config.model_fast
   if (!model) return null
 
+  // Reasoning models (gemini-2.5-pro, o-series, etc.) spend a large share of the
+  // completion budget on hidden reasoning tokens — a flat 1024 left only a few
+  // dozen tokens for the actual answer, truncating the JSON (finish_reason
+  // "length") so analysis silently produced nothing. Budget generously and let
+  // config override.
+  const maxTokens = opts.maxTokens ?? config.deep_max_tokens ?? 4096
   // SessionEnd analysis & lesson generation read RAW prompts back out of SQLite,
   // so this boundary redaction is what protects them (ARCHITECTURE_REVIEW F2/D-A).
   const bodyObj = {
     model,
-    max_tokens: 1024,
+    max_tokens: maxTokens,
     messages: redactMessages(payload.messages, config.privacy_mode),
   }
   if (jsonMode) {

@@ -288,7 +288,7 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 > v0.5 起所有记录统一存入 `data.db`；配置仍为 JSON 文件。读写经 `scripts/lib/storage.mjs` →
 > `scripts/lib/db.mjs`（`getDb()` 单例 + WAL）。
 
-**注意**：`api_key` 不存储在任何文件中，从环境变量 `MY_LINGO_API_KEY` 或 `plugin.json` userConfig 读取。
+**注意**：`api_key` 不存储在任何文件中。凭证按优先级解析：**plugin.json userConfig（Claude Code 注入为 `CLAUDE_PLUGIN_OPTION_*` 环境变量）优先，`MY_LINGO_*` 环境变量兜底**（见 `config.mjs` Layer 0 / `credValue()`）。
 
 ---
 

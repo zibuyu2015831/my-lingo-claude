@@ -111,7 +111,13 @@ function main() {
       }, config)
 
       const messages = buildAnalysisMessages(analysisTargets, config, responses)
-      const result = messages ? callDeepModel(messages, config, { maxTimeSeconds: 12 }) : null
+      // config.deep_timeout_seconds (default 55) sized for slow reasoning models;
+      // it MUST stay below the SessionEnd hook timeout in hooks.json (60), or
+      // Claude Code kills the hook before the analysis can commit. A timed-out
+      // analysis still marks turns analyzed below, so an undersized budget
+      // permanently loses those turns' learning data.
+      const deepTimeout = config.deep_timeout_seconds ?? 55
+      const result = messages ? callDeepModel(messages, config, { maxTimeSeconds: deepTimeout }) : null
 
       debugLog('SESSION_ANALYSIS_RESULT', {
         has_result: Boolean(result),

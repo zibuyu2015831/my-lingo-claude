@@ -18,6 +18,11 @@ const DEFAULT_CONFIG = {
   target_language: 'en',
   response_language_mode: 'off',
   summary_language_mode: 'off', // 'off' | 'native' — append a native-language summary to each reply
+  // Deep model (session analysis + lesson generation) budgets. Defaults are sized
+  // for slow reasoning models (e.g. gemini-2.5-pro ~24s, heavy reasoning tokens);
+  // the SessionEnd hook timeout in hooks.json must stay above deep_timeout_seconds.
+  deep_timeout_seconds: 55,
+  deep_max_tokens: 4096,
 }
 
 const DEFAULT_SPACE = {
@@ -28,6 +33,18 @@ const DEFAULT_SPACE = {
   level: 'intermediate',
   display_mode: 'full',
   auto_generate_learning: true,
+}
+
+// Resolve an API credential with plugin-userConfig precedence over shell env.
+// Claude Code exports plugin.json userConfig values as CLAUDE_PLUGIN_OPTION_<FIELD>
+// env vars; we prefer those, falling back to the user's own MY_LINGO_* exports.
+// Empty / whitespace-only values count as "not set" so they don't shadow the fallback.
+export function credValue(optKey, envKey) {
+  const opt = process.env[optKey]
+  if (opt && opt.trim()) return opt
+  const env = process.env[envKey]
+  if (env && env.trim()) return env
+  return undefined
 }
 
 function safeReadJson(filePath) {
@@ -72,11 +89,18 @@ export function loadConfig(cwd) {
     merged = { ...merged, ...projectCfg }
   }
 
-  // Layer 0 (highest): environment variable overrides for API credentials
-  if (process.env.MY_LINGO_API_KEY)      merged.api_key      = process.env.MY_LINGO_API_KEY
-  if (process.env.MY_LINGO_API_BASE_URL) merged.api_base_url = process.env.MY_LINGO_API_BASE_URL
-  if (process.env.MY_LINGO_MODEL_FAST)   merged.model_fast   = process.env.MY_LINGO_MODEL_FAST
-  if (process.env.MY_LINGO_MODEL_DEEP)   merged.model_deep   = process.env.MY_LINGO_MODEL_DEEP
+  // Layer 0 (highest): API credentials.
+  // Precedence: plugin.json userConfig (CLAUDE_PLUGIN_OPTION_*) > shell env (MY_LINGO_*).
+  // Both arrive as env vars on the hook process (Claude Code exports userConfig values
+  // as CLAUDE_PLUGIN_OPTION_<FIELD>); userConfig wins when set & non-empty, else env.
+  const api_key      = credValue('CLAUDE_PLUGIN_OPTION_API_KEY',      'MY_LINGO_API_KEY')
+  const api_base_url = credValue('CLAUDE_PLUGIN_OPTION_API_BASE_URL', 'MY_LINGO_API_BASE_URL')
+  const model_fast   = credValue('CLAUDE_PLUGIN_OPTION_MODEL_FAST',   'MY_LINGO_MODEL_FAST')
+  const model_deep   = credValue('CLAUDE_PLUGIN_OPTION_MODEL_DEEP',   'MY_LINGO_MODEL_DEEP')
+  if (api_key)      merged.api_key      = api_key
+  if (api_base_url) merged.api_base_url = api_base_url
+  if (model_fast)   merged.model_fast   = model_fast
+  if (model_deep)   merged.model_deep   = model_deep
 
   return merged
 }

@@ -10,26 +10,26 @@
     "api_base_url": {
       "type": "string",
       "title": "API Base URL",
-      "description": "OpenAI-compatible API base URL (e.g., https://api.openai.com/v1). Configured via /my-lingo:setup.",
+      "description": "OpenAI-compatible API base URL (e.g., https://api.openai.com/v1). Enter it here, or leave blank to use the MY_LINGO_API_BASE_URL env var. This field takes precedence over the env var.",
       "required": false
     },
     "api_key": {
       "type": "string",
       "title": "API Key",
-      "description": "API key for the external optimization model. Configured via /my-lingo:setup.",
+      "description": "API key for the external optimization model. Enter it here (stored securely), or leave blank to use the MY_LINGO_API_KEY env var. This field takes precedence over the env var.",
       "sensitive": true,
       "required": false
     },
     "model_fast": {
       "type": "string",
       "title": "Fast Model",
-      "description": "Model for synchronous prompt optimization (e.g., gpt-4o-mini, deepseek-chat). Configured via /my-lingo:setup.",
+      "description": "Model for synchronous prompt optimization (e.g., gpt-4o-mini, deepseek-chat). Enter it here, or leave blank to use the MY_LINGO_MODEL_FAST env var. This field takes precedence over the env var.",
       "required": false
     },
     "model_deep": {
       "type": "string",
       "title": "Deep Model",
-      "description": "Model for lesson and profile generation. Defaults to model_fast if not set.",
+      "description": "Model for lesson and profile generation (e.g., gpt-4o). Enter it here, or use the MY_LINGO_MODEL_DEEP env var. Defaults to the Fast Model if not set.",
       "required": false
     },
     "native_language": {

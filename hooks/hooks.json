@@ -44,7 +44,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-end.mjs\"",
-            "timeout": 15
+            "timeout": 60
           }
         ]
       }

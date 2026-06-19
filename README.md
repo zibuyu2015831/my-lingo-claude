@@ -45,6 +45,8 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 | `/my-lingo:space` | Show current language space config and learning stats |
 | `/my-lingo:spaces` | List all configured language spaces with stats |
 | `/my-lingo:use` | Switch active language space |
+| `/my-lingo:addspace` | Create a new language space and switch to it |
+| `/my-lingo:rmspace` | Remove a language space (the default `english` space cannot be removed) |
 | `/my-lingo:vocab` | Top vocabulary extracted from your recent interactions |
 | `/my-lingo:sentences` | Sentence patterns found in recent interactions |
 | `/my-lingo:errors` | Most common error patterns in your English |
@@ -83,9 +85,12 @@ Add the plugin directory to Claude Code's plugin configuration. In your Claude C
 
 The plugin is identified by `.claude-plugin/plugin.json` in the repository root.
 
-### 3. Set API credentials as environment variables
+### 3. Set API credentials
 
-My Lingo never collects your API key through conversation. Set these variables using your platform's native method before running `/my-lingo:setup`:
+My Lingo never collects your API key through conversation. You can configure credentials two ways — **plugin config takes precedence over environment variables**:
+
+- **Plugin config (recommended)** — fill in API Key / API Base URL / Fast Model in the plugin install screen (`userConfig`). Claude Code stores sensitive values securely and injects them into the plugin at runtime.
+- **Environment variables (fallback)** — set them yourself before running `/my-lingo:setup`.
 
 **macOS / Linux** — add to `~/.zshrc` or `~/.bashrc`, then `source` the file:
 
@@ -165,6 +170,7 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 ├── config.json      # Global settings (mode 0600)
 ├── spaces.json      # Language space configuration
 ├── circuit.json     # Circuit breaker state (auto-managed)
+├── analysis.lock    # Mutex for session analysis (auto-managed)
 └── data.db          # SQLite database (WAL mode)
     ├── turns        # Prompt records per session
     ├── responses    # Claude's replies (captured by Stop hook)
@@ -201,6 +207,34 @@ Set `response_language_mode` in `config.json` to control the language Claude rep
 | `target` | Injects an instruction asking Claude to respond in the active space's target language. |
 
 This is useful when you want immersive practice: your prompts are optimized to English while Claude's replies come back in (say) Japanese.
+
+### Native-language summary
+
+If you'd rather keep Claude replying in English but still get a quick recap in your own language, set `summary_language_mode` in `config.json`:
+
+| Value | Behaviour |
+|-------|-----------|
+| `off` | Default. No summary appended. |
+| `native` | Asks Claude to append a brief 2–3 sentence summary in your native language after each reply. |
+
+The summary language defaults to `native_language`; override it with `summary_language` if needed.
+
+---
+
+## Deep model tuning (session analysis & lessons)
+
+Session-end analysis and lesson generation use the **deep** model (`MY_LINGO_MODEL_DEEP`). Two `config.json` settings control its budget:
+
+| Key | Default | What it does |
+|-----|---------|-------------|
+| `deep_timeout_seconds` | `55` | Max seconds for a deep-model call before it's abandoned. |
+| `deep_max_tokens` | `4096` | Completion token budget for the deep model. |
+
+The defaults are sized for **slow reasoning models** (e.g. `gemini-2.5-pro`, the o-series), which spend much of their budget on hidden reasoning tokens — a small budget truncates the JSON and silently yields no corrections. Notes:
+
+- `deep_timeout_seconds` **must stay below** the `SessionEnd` hook `timeout` in `hooks/hooks.json` (default `60`). If the analysis is killed by the hook before it commits, those turns are still marked analyzed and their learning data is lost.
+- Prefer a **fast, non-reasoning** deep model (e.g. `deepseek-chat`) if you'd rather keep session-end near-instant — then you can lower both values.
+- The prompt-optimization (**fast** model) path sizes its own token budget automatically and is unaffected.
 
 ---
 

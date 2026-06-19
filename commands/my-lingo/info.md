@@ -28,13 +28,21 @@ try { cfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8'
 let spaces = { active: 'english' };
 try { spaces = JSON.parse(fs.readFileSync(path.join(dataDir, 'spaces.json'), 'utf8')); } catch {}
 
-// API credentials come exclusively from environment variables
-const apiKey     = process.env.MY_LINGO_API_KEY;
-const apiBaseUrl = process.env.MY_LINGO_API_BASE_URL;
-const modelFast  = process.env.MY_LINGO_MODEL_FAST;
+// API credentials: plugin config (CLAUDE_PLUGIN_OPTION_*) wins over MY_LINGO_* env,
+// matching loadConfig()'s Layer 0 precedence. Returns [value, source].
+function pick(opt, env) {
+  const o = process.env[opt];
+  if (o && o.trim()) return [o, 'plugin config'];
+  const e = process.env[env];
+  if (e && e.trim()) return [e, 'env'];
+  return [undefined, null];
+}
+const [apiKey,     keySrc] = pick('CLAUDE_PLUGIN_OPTION_API_KEY',      'MY_LINGO_API_KEY');
+const [apiBaseUrl, urlSrc] = pick('CLAUDE_PLUGIN_OPTION_API_BASE_URL', 'MY_LINGO_API_BASE_URL');
+const [modelFast,  fastSrc] = pick('CLAUDE_PLUGIN_OPTION_MODEL_FAST',  'MY_LINGO_MODEL_FAST');
 
-function fmt(val) {
-  return val ? val + '  (env)' : '(not set) — run /my-lingo:setup';
+function fmt(val, src) {
+  return val ? val + '  (' + src + ')' : '(not set) — run /my-lingo:setup';
 }
 
 const today = new Date().toISOString().slice(0, 10);
@@ -47,7 +55,7 @@ const fallbacks  = turns.filter(r => r.fallback);
 
 const total = countTotalTurns();
 
-const apiKeyDisplay = apiKey ? '****' + apiKey.slice(-4) + '  (env)' : '(not set) — run /my-lingo:setup';
+const apiKeyDisplay = apiKey ? '****' + apiKey.slice(-4) + '  (' + keySrc + ')' : '(not set) — run /my-lingo:setup';
 
 console.log('');
 console.log('╔══════════════════════════════════════╗');
@@ -58,8 +66,8 @@ console.log('Configuration:');
 console.log('  Mode:        ' + (cfg.execution_mode || 'english_optimized'));
 console.log('  Language:    ' + (cfg.native_language || 'zh-CN'));
 console.log('  Space:       ' + (spaces.active || 'english'));
-console.log('  Model:       ' + fmt(modelFast));
-console.log('  API URL:     ' + fmt(apiBaseUrl));
+console.log('  Model:       ' + fmt(modelFast, fastSrc));
+console.log('  API URL:     ' + fmt(apiBaseUrl, urlSrc));
 console.log('  API Key:     ' + apiKeyDisplay);
 console.log('  Privacy:     ' + (cfg.privacy_mode || 'standard'));
 console.log('');

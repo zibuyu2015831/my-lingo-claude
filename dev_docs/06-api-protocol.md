@@ -13,7 +13,7 @@ My Lingo 使用 OpenAI-compatible API，支持任意兼容接口。
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | `api_base_url` | API 基础 URL | 无（必填）|
-| `api_key` | API 密钥 | 从环境变量读取 |
+| `api_key` | API 密钥 | 从 userConfig / 环境变量读取（不落盘）|
 | `model_fast` | 同步路径使用的模型 | 无（必填）|
 | `model_deep` | 异步分析使用的模型 | 同 model_fast |
 | `timeout_seconds` | API 超时（秒）| 8 |
@@ -21,32 +21,35 @@ My Lingo 使用 OpenAI-compatible API，支持任意兼容接口。
 
 ### 1.2 API Key 读取优先级
 
-My Lingo 调用的是外部 API（OpenAI / DeepSeek / 其他），API key 由用户自行管理，通过以下路径注入：
+My Lingo 调用的是外部 API（OpenAI / DeepSeek / 其他），API key 由用户自行管理。凭证**绝不写入任何文件**（`config.mjs` 的 `CREDENTIAL_FIELDS` 在读写 config.json 时强制过滤），实际解析发生在 `loadConfig()` 的 Layer 0：
 
 ```javascript
+// config.mjs Layer 0：plugin userConfig 优先，MY_LINGO_* 环境变量兜底
+const cred = (optKey, envKey) => {
+  const v = process.env[optKey]            // CLAUDE_PLUGIN_OPTION_*（userConfig 注入）
+  if (v && v.trim()) return v
+  const e = process.env[envKey]            // MY_LINGO_*（用户手动 export）
+  if (e && e.trim()) return e
+  return undefined
+}
+// → merged.api_key / api_base_url / model_fast / model_deep
+
+// api.mjs 只读已解析好的 config
 function getApiKey(config) {
-  // 1. 环境变量（最高优先级，适合 CI / 高级用户）
-  if (process.env.MY_LINGO_API_KEY) return process.env.MY_LINGO_API_KEY
-  
-  // 2. config.json 中的 api_key 字段
-  //    由 /my-lingo:setup 向导写入 $CLAUDE_PLUGIN_DATA/my-lingo/config.json
-  //    该文件权限应设为 0o600（setup 脚本负责）
-  if (config.api_key) return config.api_key
-  
-  return null
+  return config?.api_key ?? null
 }
 ```
 
-**API key 存储路径说明**：
+**API key 来源与优先级**：
 
-| 方式 | 路径 | 写入时机 | 安全性 |
-|------|------|---------|--------|
-| 环境变量 | `MY_LINGO_API_KEY` | 用户手动 export | 进程级隔离 |
-| config.json | `$CLAUDE_PLUGIN_DATA/my-lingo/config.json` | `/my-lingo:setup` 写入 | 文件权限 0o600 |
+| 优先级 | 来源 | 形态 | 写入时机 | 安全性 |
+|------|------|------|---------|--------|
+| 高 | plugin.json userConfig | Claude Code 注入为 `CLAUDE_PLUGIN_OPTION_API_KEY` 环境变量 | 插件安装界面填写 | `sensitive` 字段存系统 keychain |
+| 低（兜底）| 环境变量 | `MY_LINGO_API_KEY` | 用户手动 export | 进程级隔离 |
 
-**注意**：plugin.json 的 `userConfig` 字段（`"sensitive": true`）目前用于 Claude Code 向用户展示配置 UI，但运行时 hook 脚本**无法**自动读取 userConfig 值——hook 是独立 Node.js 进程，userConfig 不会作为环境变量注入。因此 API key 的实际存储必须走 config.json 或环境变量路径，不能依赖 userConfig 的自动注入。
+**说明**：Claude Code 会把 plugin.json `userConfig` 的每个字段以 `CLAUDE_PLUGIN_OPTION_<字段大写>` 环境变量注入 hook 进程（`sensitive: true` 字段亦然，仅底层存储更安全）。因此运行时 hook 可直接读取 userConfig 值——无需也不会把 API key 落盘到 config.json。
 
-**不**从 git 可见的明文文件读取 API key（config.json 应加入 .gitignore）。
+**不**从 git 可见的明文文件读取 API key。
 
 ### 1.3 支持的 Provider
 

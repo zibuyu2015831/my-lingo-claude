@@ -127,3 +127,79 @@ test('getActiveSpace: returns english space by default', () => {
     assert.equal(active.key, 'english')
   })
 })
+
+// ── Layer 0 credential precedence: plugin userConfig > shell env ──────────────
+
+const CRED_ENV = [
+  'CLAUDE_PLUGIN_OPTION_API_KEY', 'CLAUDE_PLUGIN_OPTION_API_BASE_URL',
+  'CLAUDE_PLUGIN_OPTION_MODEL_FAST', 'CLAUDE_PLUGIN_OPTION_MODEL_DEEP',
+  'MY_LINGO_API_KEY', 'MY_LINGO_API_BASE_URL',
+  'MY_LINGO_MODEL_FAST', 'MY_LINGO_MODEL_DEEP',
+]
+
+// Run fn with the credential env vars set to `vals`, restoring prior values after.
+function withCredEnv(vals, fn) {
+  const saved = Object.fromEntries(CRED_ENV.map(k => [k, process.env[k]]))
+  for (const k of CRED_ENV) delete process.env[k]
+  Object.assign(process.env, vals)
+  try {
+    withTempData(() => fn())
+  } finally {
+    for (const k of CRED_ENV) {
+      if (saved[k] !== undefined) process.env[k] = saved[k]
+      else delete process.env[k]
+    }
+  }
+}
+
+test('loadConfig Layer 0: userConfig (CLAUDE_PLUGIN_OPTION_*) populates credentials', () => {
+  withCredEnv({
+    CLAUDE_PLUGIN_OPTION_API_KEY: 'plugin-key',
+    CLAUDE_PLUGIN_OPTION_API_BASE_URL: 'https://plugin.example/v1',
+    CLAUDE_PLUGIN_OPTION_MODEL_FAST: 'plugin-fast',
+    CLAUDE_PLUGIN_OPTION_MODEL_DEEP: 'plugin-deep',
+  }, () => {
+    const cfg = loadConfig(null)
+    assert.equal(cfg.api_key, 'plugin-key')
+    assert.equal(cfg.api_base_url, 'https://plugin.example/v1')
+    assert.equal(cfg.model_fast, 'plugin-fast')
+    assert.equal(cfg.model_deep, 'plugin-deep')
+  })
+})
+
+test('loadConfig Layer 0: userConfig wins over MY_LINGO_* env when both set', () => {
+  withCredEnv({
+    CLAUDE_PLUGIN_OPTION_API_KEY: 'plugin-key',
+    MY_LINGO_API_KEY: 'env-key',
+  }, () => {
+    assert.equal(loadConfig(null).api_key, 'plugin-key')
+  })
+})
+
+test('loadConfig Layer 0: falls back to MY_LINGO_* env when userConfig absent', () => {
+  withCredEnv({
+    MY_LINGO_API_KEY: 'env-key',
+    MY_LINGO_MODEL_FAST: 'env-fast',
+  }, () => {
+    const cfg = loadConfig(null)
+    assert.equal(cfg.api_key, 'env-key')
+    assert.equal(cfg.model_fast, 'env-fast')
+  })
+})
+
+test('loadConfig Layer 0: empty/whitespace userConfig falls back to env', () => {
+  withCredEnv({
+    CLAUDE_PLUGIN_OPTION_API_KEY: '   ',
+    MY_LINGO_API_KEY: 'env-key',
+  }, () => {
+    assert.equal(loadConfig(null).api_key, 'env-key')
+  })
+})
+
+test('loadConfig Layer 0: no credential source leaves fields unset', () => {
+  withCredEnv({}, () => {
+    const cfg = loadConfig(null)
+    assert.equal(cfg.api_key, undefined)
+    assert.equal(cfg.api_base_url, undefined)
+  })
+})

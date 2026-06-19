@@ -74,22 +74,36 @@ My Lingo 同时解决这两件事。
 
 ## 安装
 
-### 第一步：克隆仓库
+### 方式 A —— 从插件市场安装（推荐）
+
+在任意 Claude Code 会话中，执行这两条斜杠命令：
+
+```
+/plugin marketplace add zibuyu2015831/my-lingo-claude
+/plugin install my-lingo@zane-plugins
+```
+
+第一条命令把本仓库注册为一个插件市场，第二条命令从中安装插件。就这么简单——无需克隆，也无需编辑配置文件。随时运行 `/plugin` 可打开交互式插件管理界面。
+
+全程无需执行 `npm install`，插件没有任何 npm 依赖。
+
+### 方式 B —— 本地克隆（用于开发）
 
 ```bash
 git clone https://github.com/zibuyu2015831/my-lingo-claude.git
 cd my-lingo-claude
 ```
 
-无需执行 `npm install`，插件没有任何 npm 依赖。
+然后将本地目录注册为市场并安装：
 
-### 第二步：在 Claude Code 中注册插件
-
-将本仓库目录添加到 Claude Code 的插件配置中。在 Claude Code 设置文件（通常为 `~/.claude/settings.json`）中，将本仓库路径加入插件列表，或将目录放置到 Claude Code 扫描本地插件的位置。
+```
+/plugin marketplace add /my-lingo-claude 的绝对路径
+/plugin install my-lingo@zane-plugins
+```
 
 插件通过仓库根目录下的 `.claude-plugin/plugin.json` 识别。
 
-### 第三步：配置 API 凭证
+### 配置 API 凭证
 
 My Lingo 不会通过对话收集你的 API Key。有两种配置方式 —— **插件配置优先于环境变量**：
 
@@ -109,7 +123,7 @@ export MY_LINGO_MODEL_DEEP="gpt-4o"                        # 可选，默认与 
 
 **Windows** — 通过"系统属性 → 高级 → 环境变量"图形界面设置。
 
-### 第四步：验证配置
+### 验证配置
 
 打开 Claude Code 会话，运行：
 

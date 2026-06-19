@@ -70,22 +70,36 @@ My Lingo solves both at once. It intercepts every prompt you submit, rewrites it
 
 ## Installation
 
-### 1. Clone the repository
+### Option A — Install from the marketplace (recommended)
+
+Inside any Claude Code session, run these two slash commands:
+
+```
+/plugin marketplace add zibuyu2015831/my-lingo-claude
+/plugin install my-lingo@zane-plugins
+```
+
+The first command registers this repository as a plugin marketplace; the second installs the plugin from it. That's it — no cloning, no editing config files. Run `/plugin` anytime to open the interactive plugin manager.
+
+No `npm install` is ever needed — the plugin has zero npm dependencies.
+
+### Option B — Local clone (for development)
 
 ```bash
 git clone https://github.com/zibuyu2015831/my-lingo-claude.git
 cd my-lingo-claude
 ```
 
-No `npm install` needed — the plugin has zero npm dependencies.
+Then register the local directory as a marketplace and install from it:
 
-### 2. Register the plugin with Claude Code
-
-Add the plugin directory to Claude Code's plugin configuration. In your Claude Code settings (usually `~/.claude/settings.json`), add the path to this repository under the plugins list, or place the directory where Claude Code scans for local plugins.
+```
+/plugin marketplace add /absolute/path/to/my-lingo-claude
+/plugin install my-lingo@zane-plugins
+```
 
 The plugin is identified by `.claude-plugin/plugin.json` in the repository root.
 
-### 3. Set API credentials
+### Set API credentials
 
 My Lingo never collects your API key through conversation. You can configure credentials two ways — **plugin config takes precedence over environment variables**:
 
@@ -105,7 +119,7 @@ Any OpenAI-compatible provider works: OpenAI, DeepSeek, Groq, a local Ollama ins
 
 **Windows** — set via System Properties → Advanced → Environment Variables.
 
-### 4. Verify setup
+### Verify setup
 
 Open a Claude Code session and run:
 

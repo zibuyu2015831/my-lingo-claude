@@ -669,7 +669,7 @@ export function getDataDir() {
 
 ```
 /plugin marketplace add /data/zibuyu/my_lingo_claude
-/plugin install my-lingo@my-lingo-local
+/plugin install my-lingo@zane-plugins
 ```
 
 安装后**实测一次**（§10.5.2）：确认 `CLAUDE_PLUGIN_DATA` 形如 `~/.claude/plugins/data/my-lingo/`（无 `-skills-dir` 后缀），与 §10.3-① 去嵌套假设一致（官方文档已背书，见本轮 claude-code-guide 核实）。确认后可 `rm ~/.claude/skills/my-lingo` 卸载软链。

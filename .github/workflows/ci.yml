@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lower bound (engines.node) + current LTS. The plugin uses built-in
+        # node:sqlite / node:test, so the floor matters.
+        node-version: ['22.5.0', '22.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Validate manifests
+        run: npm run validate
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Run e2e tests
+        run: npm run test:e2e

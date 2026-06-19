@@ -1,0 +1,70 @@
+name: Release
+
+# Fires when you push a version tag, e.g.:  git tag v0.6.0 && git push origin v0.6.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so release notes can diff against the previous tag
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      # Gate the release on a green build — never ship a broken manifest or failing tests.
+      - name: Validate manifests
+        run: npm run validate
+
+      - name: Run tests
+        run: npm test && npm run test:integration && npm run test:e2e
+
+      - name: Check tag matches plugin version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag v$tag does not match plugin.json version $ver"
+            exit 1
+          fi
+
+      # Source archive of tracked files only (respects .gitignore). Archival/offline
+      # convenience — NOT the install path. Users install via /plugin marketplace add.
+      - name: Build source zip
+        run: git archive --format=zip --prefix=my-lingo/ -o "my-lingo-${GITHUB_REF_NAME}.zip" "${GITHUB_REF_NAME}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## Install
+
+          Inside Claude Code:
+
+          ```
+          /plugin marketplace add zibuyu2015831/my-lingo-claude
+          /plugin install my-lingo@zane-plugins
+          ```
+
+          > The attached `.zip` is a source archive for offline/archival use only — it is **not** the installation method. Claude Code installs the plugin by cloning the repository via the commands above.
+
+          ---
+          EOF
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          gh release create "${GITHUB_REF_NAME}" \
+            "my-lingo-${GITHUB_REF_NAME}.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            ${prev:+--notes-start-tag "$prev"} \
+            --notes-file RELEASE_NOTES.md

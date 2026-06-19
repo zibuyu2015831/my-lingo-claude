@@ -1,8 +1,8 @@
 # 命令设计
 
-版本：v0.2
+版本：v0.6
 
-所有命令以 `/my-lingo:` 为前缀。命令实现为 `commands/my-lingo/` 目录下的 markdown workflow 文件，由 Claude 读取数据并格式化输出。
+所有命令以 `/my-lingo:` 为前缀。共 18 个命令。命令实现为 `commands/my-lingo/` 目录下的 markdown workflow 文件，由 Claude 读取数据并格式化输出。
 
 ---
 
@@ -17,6 +17,8 @@
 | `/my-lingo:space` | v0.2 | 查看当前语言空间详情 |
 | `/my-lingo:spaces` | v0.2 | 列出所有语言空间 |
 | `/my-lingo:use [lang]` | v0.2 | 切换当前语言空间 |
+| `/my-lingo:addspace [key]` | v0.5 | 创建并切换到新语言空间（接 `addSpace`）|
+| `/my-lingo:rmspace [key]` | v0.5 | 删除语言空间（默认 `english` 不可删，接 `removeSpace`）|
 | `/my-lingo:recent [n]` | v0.2 | 查看最近 N 条记录 |
 | `/my-lingo:errors` | v0.2 | 查看常见语言错误 |
 | `/my-lingo:lesson` | v0.3 | 生成个性化学习课程 |
@@ -175,7 +177,7 @@ Execution mode unchanged: english_optimized
 ```
 Language space "german" not found.
 Available spaces: english, japanese
-Create it with: /my-lingo:space new german
+Create it with: /my-lingo:addspace german
 ```
 
 ---
@@ -276,11 +278,12 @@ Based on last 30 days, 89 errors analyzed.
 清空数据（需确认）。
 
 ```
-/my-lingo:purge                    # 清空当前语言空间
-/my-lingo:purge --space english    # 清空指定语言空间
-/my-lingo:purge --all              # 清空所有数据
-/my-lingo:purge --keep-config      # 保留配置，只清数据
+/my-lingo:purge                      # 清空当前活跃语言空间的学习数据（corrections + items）
+/my-lingo:purge --all                # 清空所有数据（turns/responses/corrections/items + sessions）
+/my-lingo:purge --all --keep-config  # 同上，但保留 sessions 摘要
 ```
+
+> 实际仅支持 `--all` 与 `--keep-config`（见 `purge.md` / `storage.purgeSpace`·`purgeAll`）。`--space` / `--before` / `--cwd` **未实现**。
 
 执行前显示确认提示，要求用户输入 "yes" 确认。
 

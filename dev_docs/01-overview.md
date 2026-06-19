@@ -1,6 +1,6 @@
 # My Lingo — 产品概述
 
-版本：v0.2
+版本：v0.6
 
 ---
 
@@ -94,8 +94,8 @@ My Lingo **不**应该变成：
 | 仓库名 | my-lingo-claude |
 | 命令前缀 | `/my-lingo:xxx` |
 | 默认语言空间 | English |
-| 实现语言 | Node.js |
-| 存储方案 | JSONL（MVP），SQLite（v1.0+）|
+| 实现语言 | Node.js（ESM，零 npm 依赖）|
+| 存储方案 | JSONL（v0.1–v0.4）→ **SQLite（v0.5 起，`node:sqlite`）**|
 
 ### 命名规范
 
@@ -116,9 +116,13 @@ My Lingo **不**应该变成：
 
 ## 7. 版本路线图概览
 
-| 版本 | 里程碑 |
-|------|--------|
-| v0.1 MVP | 插件骨架 + 同步 Prompt 优化 + JSONL 存储 + 基础命令 |
-| v0.2 | 多语言空间 + SessionEnd 学习分析 + 错误画像 |
-| v0.3 | 课程生成 + 简化 SRS + 词汇提取 |
-| v1.0 | SQLite 迁移 + 完整学习体系 |
+| 版本 | 里程碑 | 状态 |
+|------|--------|------|
+| v0.1 MVP | 插件骨架 + 同步 Prompt 优化 + JSONL 存储 + 基础命令 | ✅ |
+| v0.2 | 多语言空间 + SessionEnd 学习分析 + 错误画像 | ✅ |
+| v0.3 | 课程生成 + 简化 SRS + 词汇提取 | ✅ |
+| v0.4 | Stop hook + Claude 回复捕获 | ✅ |
+| v0.5 | SQLite 迁移 + 架构审查修复（F1–F12）| ✅ |
+| v0.6 | SessionStart 补偿触发 + analysis.lock（Phase 1）| ✅ Phase 1，Phase 2 待实施 |
+
+> 实现状态以 [`INDEX.md`](./INDEX.md) 为准。

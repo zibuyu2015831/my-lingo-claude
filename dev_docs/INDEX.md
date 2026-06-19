@@ -17,12 +17,12 @@
 |------|------|
 | 实现语言 | **Node.js（ESM，`*.mjs`）**，不使用 Python |
 | 外部依赖 | **零 npm 包**，只用 Node.js 标准库 + 系统 `curl` |
-| 存储方案 | **SQLite**（v0.5 起，`node:sqlite`，单库 `data.db`，WAL），路径 `$CLAUDE_PLUGIN_DATA/my-lingo/`；配置仍为 JSON。**需 Node ≥ 22.5** |
+| 存储方案 | **SQLite**（v0.5 起，`node:sqlite`，单库 `data.db`，WAL），路径 `$CLAUDE_PLUGIN_DATA/my-lingo/`；配置仍为 JSON。**需 Node ≥ 22.13**（`node:sqlite` 免 flag 起点）|
 | API 调用 | **`spawnSync('curl', [...])`**，不能用 `claude` CLI（会死锁）|
 | 语言检测 | **本地 ASCII 比率算法**，无 API 调用，< 1ms |
-| Hook 系统 | **UserPromptSubmit**（同步，8s 超时）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）|
+| Hook 系统 | **UserPromptSubmit**（同步；API 调用 8s 超时，hook 配置超时 60s）+ **Stop**（回复捕获）+ **SessionEnd**（批量分析）+ **SessionStart**（v0.6 补偿触发）|
 | 命令格式 | `commands/my-lingo/*.md`（markdown workflow + YAML frontmatter）|
-| 当前阶段 | **v0.5 + 架构审查修复轮**（见 [`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md)）；**241 单元 + 14 集成测试通过** |
+| 当前阶段 | **v0.6（版本号 0.6.0）**：v0.5 SQLite + 架构审查修复（[`15`](./15-architecture-review-v0.5.md)）+ v0.6 Phase 1（SessionStart 补偿触发）已落地；v0.6 Phase 2（阈值兜底）待实施。**256 单元 + 14 集成测试通过（另有 5 个 e2e 默认 skip）** |
 
 ---
 
@@ -55,37 +55,34 @@ my-lingo-claude/
 ├── hooks/
 │   └── hooks.json               # UserPromptSubmit + SessionEnd 配置
 ├── scripts/
-│   ├── user-prompt-submit.mjs   # Hook 主入口
+│   ├── user-prompt-submit.mjs   # UserPromptSubmit hook 主入口
 │   ├── stop.mjs                 # Stop hook：每轮结束后捕获 Claude 回复
-│   ├── session-end.mjs          # 会话结束钩子
+│   ├── session-end.mjs          # SessionEnd hook：批量学习分析（含 analysis.lock 互斥）
+│   ├── session-start.mjs        # SessionStart hook（v0.6）：补偿触发历史积压分析
 │   ├── generate-lesson.mjs      # 课程生成脚本（被 lesson.md 调用）
+│   ├── validate-manifests.mjs   # CI 用：校验 plugin/marketplace/package 元数据一致性
 │   └── lib/
-│       ├── detect.mjs           # 语言检测 + 跳过逻辑
-│       ├── config.mjs           # 4 层配置合并（含语言空间）
-│       ├── paths.mjs            # getDataDir()（独立模块，解 storage↔db 循环依赖）
+│       ├── detect.mjs           # 语言检测（二分类 en/non-english）+ 跳过逻辑
+│       ├── config.mjs           # 5 层配置合并（Layer 0 凭证 … Layer 4 默认）
+│       ├── paths.mjs            # getDataDir() + install.json 指针（解 storage↔db 循环依赖）
 │       ├── db.mjs               # SQLite 连接单例 getDb()/resetDb()（WAL + initSchema）
 │       ├── storage.mjs          # SQLite 读写工具（含 SRS + 幂等扩展）
-│       ├── api.mjs              # curl 调用 + 熔断器
+│       ├── api.mjs              # curl 调用（callFastModel）+ 熔断器
 │       ├── prompts.mjs          # Prompt 构建
-│       ├── privacy.mjs          # 脱敏处理
-│       ├── analysis.mjs         # SessionEnd 学习分析
+│       ├── privacy.mjs          # 脱敏处理（redact / redactMessages 出站边界）
+│       ├── analysis.mjs         # SessionEnd 学习分析（callDeepModel）
 │       ├── srs.mjs              # SRS 纯函数（computeNextReview / getItemsDue）
-│       └── lesson.mjs           # 课程纯函数（buildLessonMessages / parseLessonResponse）
+│       ├── lesson.mjs           # 课程纯函数（buildLessonMessages / parseLessonResponse）
+│       └── debug.mjs            # MY_LINGO_DEBUG 调试日志（写前脱敏 + 轮转）
 ├── tests/
-│   ├── detect.test.mjs
-│   ├── prompts.test.mjs
-│   ├── privacy.test.mjs
-│   ├── config.test.mjs
-│   ├── storage.test.mjs
-│   ├── srs.test.mjs
-│   ├── lesson.test.mjs
-│   ├── analysis.test.mjs
-│   ├── spaces.test.mjs
-│   ├── debug.test.mjs
-│   └── integration/
-│       ├── mock-server.mjs      # 本地 HTTP mock server
-│       ├── helpers.mjs          # 临时目录、配置写入封装
-│       └── integration.test.mjs # 12 个集成测试用例（PT-001 ~ PT-013）
+│   ├── *.test.mjs               # 单元测试（analysis/api/config/debug/detect/lesson/
+│   │                            #   paths/privacy/prompts/spaces/srs/stop/storage），共 256 个
+│   ├── integration/
+│   │   ├── mock-server.mjs      # 本地 HTTP mock server
+│   │   ├── helpers.mjs          # 临时目录、配置写入封装
+│   │   └── integration.test.mjs # 14 个集成测试用例（PT-001 ~ PT-016，PT-007/014 为手动）
+│   └── e2e/
+│       └── e2e.test.mjs         # 5 个端到端用例（默认 skip）
 └── dev_docs/                    # 本文档体系所在位置
 ```
 
@@ -124,17 +121,23 @@ my-lingo-claude/
 
 ```
 用户按 Enter
-  → hook 进程启动（node scripts/user-prompt-submit.mjs）
+  → hook 进程启动（node scripts/user-prompt-submit.mjs）→ writeInstallPointer()
   → 读取 stdin JSON：{ prompt, cwd, session_id }
-  → shouldSkip()：slash命令/!命令/过短/纯代码块 → 直接退出
-  → loadConfig()：读取 config.json + spaces.json（4层合并）
+  → 前缀分流（在 shouldSkip 之前）：
+      ├─ '--' 前缀 → 跳过优化，写 turn(mode:'raw')，emit 提示，退出
+      └─ '::' 前缀 → 标记 isRefine（绕过 shouldSkip，使 ":: fix" 等短命令可用）
+  → shouldSkip()（非 refine 时）：slash命令 '/' / 过短 / 纯代码块 / URL·shell前缀 → 退出
+      （注：'!' 由 Claude Code 在更上层拦截为终端命令，根本不进 hook；shouldSkip 不含 '!' 规则）
+  → loadConfig()：读取 config.json + spaces.json（5 层合并，Layer 0 凭证来自 env）
   → execution_mode === 'off' → 退出
-  → detectLanguage()：ASCII 比率算法（本地，< 1ms）
+  → max_prompt_length 守卫（超长 → 写 turn(fallback,'too_long')，退出）
   → execution_mode === 'original' → 只写 turn 记录（DB），退出
-  → redact()：脱敏后发给外部 API
-  → callFastModel()：curl 调用，超时 8s
-      ├─ 成功 → 写 turn 记录（DB），emit { additionalContext, systemMessage }
-      └─ 失败 → fallback：写 turn（fallback:true），emit systemMessage 提示
+  → '::' refine 路径：callFastModel(refine) → 注入“refined intent”
+  → detectLanguage()：ASCII 比率算法（本地 < 1ms，二分类 en / non-english）
+  → checkCircuitBreaker()：连续 3 次失败且冷却窗内 → fallback，退出
+  → callFastModel()：curl 调用，超时 8s（脱敏在 callFastModel 内的出站边界完成）
+      ├─ 成功 → recordApiSuccess()，写 turn 记录（DB），emit { additionalContext, systemMessage }
+      └─ 失败 → recordApiFailure()，写 turn（fallback:true），按 fallback_policy emit 提示
   → hook 进程退出
   → Claude Code 读取输出，注入 additionalContext，Claude 处理 prompt
 ```
@@ -143,11 +146,15 @@ my-lingo-claude/
 
 ```
 CANONICAL REQUEST: The user's message is in {lang}. They have configured
-My Lingo to optimize prompts to English. Treat the following as their
-actual request and ignore the language of their original message:
+My Lingo to optimize prompts to English. Treat the following as their actual
+request. Disregard only the text language of their original message — still
+process any attached images, files, or other non-text content:
 
 {execution_prompt_en}
 ```
+
+> 之后可能追加（取决于配置）：`summary_language_mode='native'` 时的母语摘要指令、
+> `response_language_mode='target'` 时的目标语言回复指令（见 `02-core-concepts.md` §6–7）。
 
 ### Stop Hook 路径（每轮结束，捕获 Claude 回复）
 
@@ -186,8 +193,8 @@ Claude 会话结束
 | D2 进程模型 | 无 daemon，用 SessionEnd 替代异步 worker | [00-decisions.md#D2](./00-decisions.md) |
 | D3 存储 | v0.1–v0.4 JSONL；**v0.5 起 SQLite（`node:sqlite`，WAL，单库 `data.db`）** | [00-decisions.md#D3](./00-decisions.md) |
 | D4 超时/熔断 | 8s 超时 + 连续 3 次失败触发熔断（circuit.json） | [00-decisions.md#D4](./00-decisions.md) |
-| D5 语言检测 | 本地 ASCII 比率（≥85% 英文，≤30% CJK，中间为 mixed） | [00-decisions.md#D5](./00-decisions.md) |
-| D6 跳过逻辑 | `/` `!` 前缀、< 8 字符、纯代码块、URL 前缀 | [00-decisions.md#D6](./00-decisions.md) |
+| D5 语言检测 | 本地 ASCII 比率二分类：≥85% → `en`，否则 `non-english`（无 mixed 态） | [00-decisions.md#D5](./00-decisions.md) |
+| D6 跳过逻辑 | `/` 前缀、`< 8 字符且 < 3 词`、纯代码块、URL/shell 前缀（`!` 由 Claude Code 上层拦截，不在 shouldSkip 内）；`--`/`::` 在 shouldSkip 前分流 | [00-decisions.md#D6](./00-decisions.md) |
 | D7 API 调用 | `spawnSync('curl', [...])` —— 不能用 `claude` CLI（死锁）| [00-decisions.md#D7](./00-decisions.md) |
 | D8 学习系统 | SessionEnd 生成摘要（MVP），SRS 在 v0.3 | [00-decisions.md#D8](./00-decisions.md) |
 | D14 Claude 回复捕获 | Stop hook + transcript 读取，responses/ 缓存，竞态静默处理 | [00-decisions.md#D14](./00-decisions.md) |
@@ -199,15 +206,15 @@ Claude 会话结束
 
 ---
 
-## 实现状态（v0.5 完成，v0.6 待实施）
+## 实现状态（v0.6 进行中）
 
-当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，[`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md)）；241 单元测试 + 14 集成测试通过。v0.6（分析触发保障）待实施。**
+当前状态：**v0.5 已完成（SQLite 存储迁移）+ 架构审查修复轮（2026-06-11，[`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md)）；v0.6 Phase 1（SessionStart 补偿触发 + analysis.lock）已落地（版本号 0.6.0）。256 单元 + 14 集成测试通过。v0.6 Phase 2（UserPromptSubmit 阈值兜底）及 Phase 1 配套测试（PT-014 / session-start 单测）待补。**
 
 ### v0.1 实现阶段（MVP）
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 0 | 插件骨架：`plugin.json` + `hooks/hooks.json` + hook 桩 + `storage.mjs` + `status.md` | ✅ 已完成 |
+| Phase 0 | 插件骨架：`plugin.json` + `hooks/hooks.json` + hook 桩 + `storage.mjs` + `status.md`（v0.5 重命名为 `info.md`） | ✅ 已完成 |
 | Phase 1 | `detect.mjs`（语言检测 + 跳过逻辑） | ✅ 已完成 |
 | Phase 2 | `api.mjs`（curl 调用 + 熔断器）+ `prompts.mjs` + `additionalContext`/`systemMessage` 注入 | ✅ 已完成 |
 | Phase 3 | `config.mjs`（4 层配置合并）+ `setup.md` + `mode.md` | ✅ 已完成 |
@@ -241,7 +248,7 @@ Claude 会话结束
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 0 | `package.json` `engines.node>=22.5.0` | ✅ 已完成 |
+| Phase 0 | `package.json` `engines.node>=22.13.0`（`node:sqlite` 免 flag 起点）| ✅ 已完成 |
 | Phase 1 | `paths.mjs` + `db.mjs`（WAL/单例/initSchema）+ `storage.mjs` 全面 SQL 化 + `srs.computeIntervalDays` + 测试重写 | ✅ 已完成 |
 | Phase 2 | `session-end.mjs` 幂等单事务 + `review.md`（按 id）+ `purge.md`（操作 DB）+ 集成测试 DB 化 | ✅ 已完成 |
 | Phase 2.5 | 只读命令 SQLite 化（`status`/`recent`/`last`/`errors`/`space`/`spaces` 由内联 JSONL 读改为 import `storage.mjs`）+ `countTurnsForSpace`/`countCorrectionsForSpace` + 单元测试 | ✅ 已完成 |
@@ -255,8 +262,8 @@ Claude 会话结束
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 1 | 新增 `scripts/session-start.mjs` + 更新 `hooks/hooks.json`（SessionStart 条目）+ `session-end.mjs` 增加 lock 清理 + 单元测试 + PT-014 集成测试 | 待实施 |
-| Phase 2 | `config.mjs` 新增阈值配置项 + `user-prompt-submit.mjs` 阈值兜底触发 + 补充测试 | 待实施 |
+| Phase 1 | 新增 `scripts/session-start.mjs` + `hooks/hooks.json` SessionStart 条目 + `session-end.mjs` 的 `analysis.lock` 写/清 | ✅ 已落地（配套 PT-014 / session-start 单测**待补**） |
+| Phase 2 | `config.mjs` 新增阈值配置项 + `user-prompt-submit.mjs` 阈值兜底触发 + 补充测试 | ⬜ 待实施 |
 
 ### MVP 必须实现的功能（10 项）
 
@@ -281,10 +288,15 @@ $CLAUDE_PLUGIN_DATA/my-lingo/
 ├── spaces.json                  # 语言空间配置（active space、各 space 设置）
 ├── circuit.json                 # 熔断器状态（failure_count、last_failure_at）
 ├── analysis.lock                # 分析进程互斥锁（v0.6+，内含 PID，5 分钟超时）
+├── debug.log                    # MY_LINGO_DEBUG=1 时的调试日志（写前脱敏 + 1MB 轮转）
+├── learning/<space>/            # /my-lingo:lesson 生成的课程：lessons-YYYY-MM-DD.md
 └── data.db                      # SQLite 单库（WAL）：turns / responses /
                                  #   corrections / learning_items / sessions 五张表
                                  #   （运行时伴随 data.db-wal / data.db-shm）
 ```
+
+> 另：env-blind slash 命令的定位指针写在固定路径
+> `~/.claude/plugins/data/my-lingo/install.json`（由 hook 的 `writeInstallPointer()` 维护，见 dev_docs/14）。
 
 > v0.5 起所有记录统一存入 `data.db`；配置仍为 JSON 文件。读写经 `scripts/lib/storage.mjs` →
 > `scripts/lib/db.mjs`（`getDb()` 单例 + WAL）。

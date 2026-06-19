@@ -1,6 +1,6 @@
 # 插件目录结构与 plugin.json
 
-版本：v0.2
+版本：v0.6
 
 ---
 
@@ -10,58 +10,48 @@
 my-lingo-claude/
 │
 ├── .claude-plugin/
-│   └── plugin.json                  # 插件元数据（唯一放在此目录的文件）
+│   ├── plugin.json                  # 插件元数据
+│   └── marketplace.json             # marketplace 条目（zane-plugins）
 │
 ├── commands/
-│   └── my-lingo/                    # 命令 namespace
-│       ├── setup.md                 # /my-lingo:setup
-│       ├── info.md                  # /my-lingo:info
-│       ├── last.md                  # /my-lingo:last
-│       ├── mode.md                  # /my-lingo:mode
-│       ├── space.md                 # /my-lingo:space (v0.2)
-│       ├── spaces.md                # /my-lingo:spaces (v0.2)
-│       ├── use.md                   # /my-lingo:use (v0.2)
-│       ├── recent.md                # /my-lingo:recent (v0.2)
-│       ├── errors.md                # /my-lingo:errors (v0.2)
-│       ├── lesson.md                # /my-lingo:lesson (v0.3)
-│       ├── vocab.md                 # /my-lingo:vocab (v0.3)
-│       ├── profile.md               # /my-lingo:profile (v0.3)
-│       ├── review.md                # /my-lingo:review (v0.3)
-│       ├── export.md                # /my-lingo:export (v0.3)
-│       └── purge.md                 # /my-lingo:purge (v0.2)
+│   └── my-lingo/                    # 命令 namespace（18 个）
+│       ├── setup.md  info.md  last.md  mode.md
+│       ├── space.md  spaces.md  use.md  addspace.md  rmspace.md   # 语言空间
+│       ├── recent.md  errors.md  purge.md
+│       └── lesson.md  vocab.md  sentences.md  profile.md  review.md  export.md
 │
 ├── hooks/
-│   └── hooks.json                   # Hook 配置（详见 05-hooks.md）
+│   └── hooks.json                   # Hook 配置：SessionStart/UserPromptSubmit/Stop/SessionEnd（详见 05-hooks.md）
 │
 ├── scripts/                         # Node.js hook 脚本
 │   ├── user-prompt-submit.mjs       # UserPromptSubmit hook 入口
+│   ├── stop.mjs                     # Stop hook 入口（回复捕获）
 │   ├── session-end.mjs              # SessionEnd hook 入口
+│   ├── session-start.mjs            # SessionStart hook 入口（v0.6 补偿触发）
+│   ├── generate-lesson.mjs          # 课程生成（被 lesson.md 调用）
+│   ├── validate-manifests.mjs       # CI：元数据一致性校验
 │   └── lib/
-│       ├── detect.mjs               # 语言检测
-│       ├── config.mjs               # 配置加载
-│       ├── storage.mjs              # JSONL 读写
-│       ├── api.mjs                  # 外部 API 调用
-│       ├── prompts.mjs              # Prompt 构建
-│       └── privacy.mjs              # 脱敏处理
+│       ├── detect.mjs   config.mjs   paths.mjs   db.mjs   storage.mjs
+│       ├── api.mjs      prompts.mjs  privacy.mjs analysis.mjs
+│       └── srs.mjs      lesson.mjs   debug.mjs
 │
-├── tests/                           # 单元测试
-│   ├── detect.test.mjs
-│   ├── privacy.test.mjs
-│   ├── config.test.mjs
-│   └── storage.test.mjs
+├── tests/                           # 单元测试（256）+ integration（14）+ e2e（5, skip）
+│   ├── *.test.mjs
+│   ├── integration/{mock-server,helpers,integration.test}.mjs
+│   └── e2e/e2e.test.mjs
 │
 ├── dev_docs/                        # 开发文档体系
-│   ├── 00-decisions.md
-│   ├── 01-overview.md
-│   └── ...
+│   ├── 00-decisions.md  01-overview.md  …  15-architecture-review-v0.5.md
+│   ├── INDEX.md
+│   └── development/IMPLEMENTATION_PLAN_V0.*.md
 │
 ├── package.json
 ├── .gitignore
-└── README.md
+└── README.md / README.zh.md
 ```
 
 **关键原则**：
-- `.claude-plugin/` 目录内**只放** `plugin.json`
+- `.claude-plugin/` 目录内放 `plugin.json`（必需）与 `marketplace.json`（发布用）
 - `commands/`、`hooks/`、`scripts/` 都在根目录
 - 不使用旧版 `skills/SKILL.md` 格式，使用 `commands/` 新格式
 
@@ -74,33 +64,36 @@ my-lingo-claude/
 ```json
 {
   "name": "my-lingo",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "A personal Claude Code language-learning and prompt-enhancement plugin. Optimizes your prompts to English and builds personalized language learning materials from your real coding interactions.",
-  "author": "Zane",
+  "author": { "name": "Zane", "email": "zane.wu.dev@gmail.com" },
+  "license": "MIT",
+  "keywords": ["language-learning", "prompt-optimization", "non-native", "chinese", "translation", "developer-tools"],
+  "category": "developer-tools",
   "userConfig": {
     "api_base_url": {
       "type": "string",
       "title": "API Base URL",
-      "description": "OpenAI-compatible API base URL (e.g., https://api.openai.com/v1).",
-      "required": true
+      "description": "OpenAI-compatible API base URL (e.g., https://api.openai.com/v1). Enter it here, or leave blank to use the MY_LINGO_API_BASE_URL env var. This field takes precedence over the env var.",
+      "required": false
     },
     "api_key": {
       "type": "string",
       "title": "API Key",
-      "description": "API key for the external optimization model. Displayed in Claude Code UI only — the hook script reads it from config.json written by /my-lingo:setup.",
+      "description": "API key for the external optimization model. Enter it here (stored securely), or leave blank to use the MY_LINGO_API_KEY env var. This field takes precedence over the env var.",
       "sensitive": true,
-      "required": true
+      "required": false
     },
     "model_fast": {
       "type": "string",
       "title": "Fast Model",
-      "description": "Model for synchronous prompt optimization (e.g., gpt-4o-mini, deepseek-chat).",
-      "required": true
+      "description": "Model for synchronous prompt optimization (e.g., gpt-4o-mini, deepseek-chat). … This field takes precedence over the env var.",
+      "required": false
     },
     "model_deep": {
       "type": "string",
       "title": "Deep Model",
-      "description": "Model for lesson and profile generation. Defaults to model_fast if not set.",
+      "description": "Model for lesson and profile generation (e.g., gpt-4o). … Defaults to the Fast Model if not set.",
       "required": false
     },
     "native_language": {
@@ -108,12 +101,6 @@ my-lingo-claude/
       "title": "Native Language",
       "description": "Your native language code for explanations (e.g., zh-CN, ja, ko).",
       "default": "zh-CN"
-    },
-    "default_target_language": {
-      "type": "string",
-      "title": "Default Target Language",
-      "description": "Target language for your first language space (e.g., en, ja, de).",
-      "default": "en"
     },
     "execution_mode": {
       "type": "string",
@@ -130,6 +117,8 @@ my-lingo-claude/
   }
 }
 ```
+
+> 与早期草稿的差异：所有凭证字段 `required: false`（凭证可改走环境变量，不强制在安装界面填）；`api_key` 由 Claude Code 注入为 `CLAUDE_PLUGIN_OPTION_API_KEY`，hook 直接读环境变量、**绝不写入 config.json**；`author` 是对象；无 `default_target_language` 字段（目标语言由语言空间的 `target_language` 决定）。
 
 **关于 `userConfig` 的重要说明**：
 
@@ -150,13 +139,13 @@ Claude Code 会把 plugin.json `userConfig` 的每个字段以 `CLAUDE_PLUGIN_OP
 
 ```markdown
 ---
-name: status
+name: info
 description: |
   Show current My Lingo status, configuration, and today's stats.
   <example>
   Context: User wants to check what language space is active and how many prompts were optimized today.
   user: "/my-lingo:info"
-  assistant: "Reading My Lingo configuration and today's JSONL data to display status."
+  assistant: "Reading My Lingo configuration and today's data to display status."
   </example>
 argument-hint: ""
 allowed-tools: Bash, Read
@@ -168,19 +157,21 @@ Read the configuration and today's turns data, then display a formatted status r
 
 ### Step 1: Load config
 
-Read `$CLAUDE_PLUGIN_DATA/my-lingo/config.json` and `$CLAUDE_PLUGIN_DATA/my-lingo/spaces.json`.
-If config.json does not exist, show a setup prompt instead.
+通过 `import` 复用 `scripts/lib/*` 读取配置与统计（命令在 env-blind 子进程里运行，需经
+`install.json` 指针定位 plugin root + data dir，见 dev_docs/14）。
 
 ### Step 2: Load today's stats
 
-Read today's JSONL file from `$CLAUDE_PLUGIN_DATA/my-lingo/turns/YYYY-MM-DD.jsonl`.
-Count: total, optimized (non-fallback), translated, corrected, fallbacks.
+经 `storage.mjs` 从 `data.db` 读取（**不再**内联读 JSONL）。
+Count: total, optimized (non-fallback), translated, corrected, fallbacks。
 
 ### Step 3: Display
 
 Output the status in this format:
 ...
 ```
+
+> 命令名是 `info`（早期叫 `status`，v0.5 重命名）。
 
 ---
 
@@ -189,17 +180,22 @@ Output the status in this format:
 ```json
 {
   "name": "my-lingo-claude",
-  "version": "0.1.0",
-  "description": "My Lingo Claude Code plugin",
+  "version": "0.6.0",
+  "description": "My Lingo Claude Code plugin — prompt optimization and language learning",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:integration": "node --test tests/integration/integration.test.mjs",
+    "test:e2e": "node --test tests/e2e/*.test.mjs",
+    "validate": "node scripts/validate-manifests.mjs"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   }
 }
 ```
+
+> `engines.node` 为 **`>=22.13.0`**（不是 18）——`storage.mjs` 依赖 Node 内置 `node:sqlite`；该模块 22.5 起存在但需 `--experimental-sqlite` flag，**自 22.13 起才免 flag 可用**，故 floor 锁定 22.13（见 `00-decisions.md` D3 / `15` F10）。
 
 **最小依赖原则**：只使用 Node.js 标准库（`fs`、`path`、`os`、`child_process`）和系统的 `curl`。不引入任何 npm 包，避免 `node_modules` 带来的依赖管理问题。
 

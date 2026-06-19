@@ -1,6 +1,6 @@
 # 关键技术决策与问题解决方案
 
-版本：v0.2  
+版本：v0.2–v0.6（决策记录，含后续版本追加的 D14/D15 与落地修订）  
 本文档是对初版设计方案（原 `design.md`，已拆分进本 dev_docs 文档体系后删除）深度复盘后形成的决策文档，每个决策都包含问题背景、推荐方案、备选方案和决策理由。
 
 ---
@@ -154,7 +154,7 @@ SessionEnd 无法标记"已处理"导致崩溃重跑重复生成 corrections；`
 需全文件重写；跨日期/跨月查询需在应用层拼接多文件。
 
 **关键约束（实施时实测确认，记录以防回退）：**
-- 使用 Node 内置 `node:sqlite`（需 **Node ≥ 22.5**，`package.json` 的 `engines.node` 已收紧），保持零 npm 依赖。
+- 使用 Node 内置 `node:sqlite`（需 **Node ≥ 22.13** —— 该模块 22.5 起需 `--experimental-sqlite` flag，22.13 起免 flag；`package.json` 的 `engines.node` 已锁 `>=22.13.0`），保持零 npm 依赖。
 - 单文件 `$CLAUDE_PLUGIN_DATA/my-lingo/data.db`，WAL 模式 + `busy_timeout=3000`，匹配多 hook 进程并发。
 - `node:sqlite` **不能绑定布尔 / `undefined` / 对象**，写入层统一转 `0/1` / `null` / `JSON.stringify`；读取层把整数标志位还原为布尔。
 - 时间统一存 ISO-`Z` 字符串，日期范围查询用 `substr(ts,1,10)` / `substr(ts,1,7)` 切片比较，**不依赖** SQLite 的 `datetime('now')`（其输出格式与 ISO-`Z` 字典序不可比）。
@@ -227,20 +227,22 @@ else return 'non-english'
 
 **分层检测（无额外 API 成本）：**
 
+设计阶段曾考虑三分类（en / cjk / mixed），但最终采用与参考实现一致的**二分类**：
+
 ```javascript
-function detectLanguage(text) {
-  // 1. 快速启发式（本地，< 1ms）
-  const ascii = asciiRatio(text)
-  if (ascii >= 0.85) return { lang: 'en', confidence: 'high' }
-  if (ascii <= 0.30) return { lang: 'cjk', confidence: 'high' }  // CJK 字符为主
-  
-  // 2. 混合语言（如中英混合，常见于技术 prompt）
-  return { lang: 'mixed', confidence: 'medium' }
+// 实际实现（detect.mjs）：ratio 为 0–100 整数；只分 en / non-english，无 mixed/cjk/confidence
+export function detectLanguage(text) {
+  const chars = [...text]
+  const asciiCount = chars.filter(c => {
+    const code = c.charCodeAt(0)
+    return code >= 0x20 && code <= 0x7e
+  }).length
+  const ratio = Math.round((asciiCount / chars.length) * 100)
+  return { lang: ratio >= 85 ? 'en' : 'non-english', ratio }
 }
 ```
 
-对于 `mixed` 情况，视为需要优化（英文技术词保留，中文翻译）。  
-语言检测结果存入 turn 记录供后续分析。
+> **落地说明**：三分类的 `mixed`/`cjk`/`confidence` 字段从未实现。所有"非以英文为主"的输入统一归为 `non-english`，照常走优化路径（英文技术词由优化器 system prompt 负责保留）。语言检测结果（`lang` + `ratio`）存入 turn 记录供后续分析。
 
 ---
 
@@ -263,25 +265,27 @@ function shouldSkip(prompt) {
 
 ### 推荐方案
 
-在参考实现基础上扩展：
+实际实现（`detect.mjs`，注意**不含 `!` 规则**——见下方落地说明）：
 
 ```javascript
-function shouldSkip(prompt) {
+export function shouldSkip(prompt) {
+  if (!prompt) return true
   if (prompt.startsWith('/')) return true            // slash 命令（包括 /my-lingo:xxx）
-  if (prompt.startsWith('!')) return true            // shell 命令
-  if (prompt.startsWith('::')) return false          // 强制优化前缀（保留处理）
-  if (/^`{3}/.test(prompt)) return true             // 纯代码块
-  const chars = [...prompt].length
-  if (chars < 8) return true
-  if (/^(https?:|git@|ssh:\/\/|npm |pip |cargo |brew |sudo |cd |ls )/i.test(prompt)) return true
+  const charCount = [...prompt].length
+  const wordCount = prompt.split(/\s+/).filter(Boolean).length
+  if (charCount < 8 && wordCount < 3) return true    // 过短：字符<8 且 词数<3（CJK 无空格用字符兜底）
+  if (/^```/.test(prompt.trim())) return true        // 纯代码块
+  if (/^(https?:|git@|ssh:\/\/|npm |pip |cargo |brew |sudo |cd |ls |cat |grep |docker |kubectl )/i.test(prompt)) return true
   return false
 }
 ```
 
-**特殊前缀设计：**
-- `::` 前缀 → 强制优化模式（参考实现用于"refine"，My Lingo 同样适用）
-- `--` 前缀 → 本次跳过优化，直接发原始输入
-- `/my-lingo:mode raw` → 全局切换模式
+> **落地说明（v0.3 起）**：`shouldSkip` **不再检查 `!` 前缀**。原因见 [`13-raw-prefix-rename.md`](./13-raw-prefix-rename.md)：Claude Code 在 UI 层把 `!foo` 解释为终端命令，`!` 开头的消息**根本不会进入 hook**，因此 hook 内无需也不应判断它。过短判定是"字符<8 **且** 词数<3"的复合条件（非单纯 `<8`）。
+
+**特殊前缀设计（均在 `shouldSkip` 之前于 `user-prompt-submit.mjs` 分流）：**
+- `--` 前缀 → 本次跳过优化，仅记录并透传原始输入（mode:'raw'）
+- `::` 前缀 → 强制 refine 模式；**绕过 `shouldSkip`**，使 ":: fix" 等短输入也能处理
+- `/my-lingo:mode <mode>` → 全局切换执行模式
 
 ---
 
@@ -309,7 +313,7 @@ API key 从 `ANTHROPIC_API_KEY` 环境变量或 macOS keychain 读取，**不需
 
 **统一使用 OpenAI-compatible API + curl 方式：**
 
-My Lingo 支持任意 OpenAI-compatible provider，用 curl 同步调用：
+My Lingo 支持任意 OpenAI-compatible provider，用 curl 同步调用（下方为决策当时的示意；最终实现 `max_tokens` 改为随输入动态放大 512–2048，并在出站边界统一脱敏，见 [`06-api-protocol.md`](./06-api-protocol.md) §3.1）：
 
 ```javascript
 function callFastModel(systemPrompt, userText, config) {
@@ -339,10 +343,12 @@ function callFastModel(systemPrompt, userText, config) {
 }
 ```
 
-**API key 存储优先级：**
-1. `MY_LINGO_API_KEY` 环境变量
-2. `plugin.json` 的 `userConfig.api_key`（Claude Code 加密存储）
-3. 不读取磁盘上的明文配置文件
+**API key 解析优先级（最终实现，见 `config.mjs` Layer 0 / `credValue()`，另见 [`12-env-var-config.md`](./12-env-var-config.md)）：**
+1. **plugin.json `userConfig`**（Claude Code 注入为 `CLAUDE_PLUGIN_OPTION_API_KEY` 环境变量）—— **优先**
+2. `MY_LINGO_API_KEY` 用户手动 export 的环境变量 —— **兜底**
+3. 绝不读取/写入磁盘上的明文配置文件（`CREDENTIAL_FIELDS` 在读写 config.json 时强制过滤）
+
+> 注：本节早期草稿把优先级写反（env 优先）。最终实现以 userConfig 优先，空值时回退到 `MY_LINGO_*`。
 
 ---
 
@@ -444,9 +450,9 @@ function redact(text) {
 }
 ```
 
-**脱敏时机：发送给外部 API 之前，存储到本地 JSONL 不脱敏（用户有权看到自己的原始输入）**
+**脱敏时机：发送给外部 API 之前**（最终实现下沉到出站边界 `redactMessages`，见 `09-privacy-security.md`）；本地存储不脱敏（用户有权看到自己的原始输入）。
 
-提供 `privacy_mode: "strict"` 配置，开启后连本地存储也脱敏。
+> 落地说明：当初设想的 `privacy_mode: "strict"`（本地也脱敏）**最终未实现**。当前 `privacy_mode` 只区分 `standard`（出站脱敏）与 `off`（不脱敏）；`strict` 等值都按 `standard` 处理，本地始终存原文。
 
 ---
 
@@ -590,12 +596,12 @@ Claude Code 将完整对话（含 Claude 的每条回复）实时写入本地 JS
 ~/.claude/projects/<path-hash>/<session-id>.jsonl
 ```
 
-**path-hash 推导算法（已通过实验验证）：**
+**path-hash 推导算法（最终实现，见 `stop.mjs` + F8 修复）：**
 ```js
 // /data/zibuyu/my_lingo_claude → -data-zibuyu-my-lingo-claude
-const hash = cwd.replace(/\//g, '-').replace(/_/g, '-')
+const hash = cwd.replace(/[^a-zA-Z0-9]/g, '-')
 ```
-将 cwd 中所有 `/` 和 `_` 替换为 `-`（前导 `/` 变为前导 `-`）。
+将 cwd 中**所有非字母数字字符**替换为 `-`（对齐 Claude Code 真实规则）。早期版本只替换 `/` 和 `_`，对含 `.`、空格、`@` 的工程路径会算错目录、静默丢失回复捕获——已由 [`15-architecture-review-v0.5.md`](./15-architecture-review-v0.5.md) 的 F8 修复。
 
 **JSONL 行格式（assistant 回复）：**
 ```json
@@ -692,7 +698,7 @@ PostToolUse 在每次工具调用后触发，包含工具输出，但不包含 C
 | 决策点 | 原设计 | 推荐方案 |
 |--------|--------|----------|
 | 实现语言 | Python | Node.js |
-| 存储方案 | SQLite（7张表）| JSONL 文件（MVP），SQLite（v1.0+）|
+| 存储方案 | SQLite（7张表）| JSONL（v0.1–v0.4）→ **SQLite（v0.5 起，`node:sqlite`，单库 5 表）**|
 | 异步 worker | 独立 daemon | 无 daemon，改用 SessionEnd 钩子 |
 | 语言检测 | 调用外部 API | 本地 ASCII 比率算法 |
 | API 调用 | Python requests | curl + spawnSync |

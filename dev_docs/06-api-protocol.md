@@ -1,6 +1,6 @@
 # 外部 API 设计与 Prompt 协议
 
-版本：v0.2
+版本：v0.6
 
 ---
 
@@ -16,8 +16,12 @@ My Lingo 使用 OpenAI-compatible API，支持任意兼容接口。
 | `api_key` | API 密钥 | 从 userConfig / 环境变量读取（不落盘）|
 | `model_fast` | 同步路径使用的模型 | 无（必填）|
 | `model_deep` | 异步分析使用的模型 | 同 model_fast |
-| `timeout_seconds` | API 超时（秒）| 8 |
-| `max_retries` | 最大重试次数（同步路径不重试）| 0 |
+| `timeout_seconds` | fast model API 超时（秒）| 8 |
+| `deep_timeout_seconds` | deep model（分析/课程）超时（秒）| 55 |
+| `deep_max_tokens` | deep model 输出预算 | 4096 |
+| `circuit_breaker_cooldown_minutes` | 熔断冷却时长（分钟）| 5 |
+
+> 同步路径不重试（无 `max_retries` 配置）；失败即按 `fallback_policy` 回退。
 
 ### 1.2 API Key 读取优先级
 
@@ -105,21 +109,27 @@ function getApiKey(config) {
 import { spawnSync } from 'node:child_process'
 
 export function callFastModel(payload, config) {
-  const body = JSON.stringify({
-    model: config.model_fast,
-    max_tokens: 512,
-    response_format: { type: 'json_object' },
-    messages: payload.messages
-  })
-  
-  const timeoutSec = config.timeout_seconds || 8
   const apiKey = getApiKey(config)
-  
   if (!apiKey) {
-    console.error('[my-lingo] No API key configured. Run /my-lingo:setup')
+    process.stderr.write('[my-lingo] No API key configured. Run /my-lingo:setup\n')
     return null
   }
-  
+  if (!config.api_base_url || !config.model_fast) return null
+
+  const timeoutSec = config.timeout_seconds || 8
+  // 唯一出站边界：发送前对整个 messages 统一脱敏（privacy.mjs，F2/D-A）
+  const messages = redactMessages(payload.messages, config.privacy_mode)
+  // 输出预算随输入规模动态放大（512–2048），避免固定 512 截断长 prompt 的 JSON（F7）
+  const inputChars = messages.reduce(
+    (s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
+  const maxTokens = Math.min(2048, Math.max(512, Math.ceil(inputChars / 2) + 256))
+  const body = JSON.stringify({
+    model: config.model_fast,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+    messages,
+  })
+
   // 注意：不能在 hook 中使用 claude CLI（死锁），必须直接调用 curl
   const result = spawnSync('curl', [
     '-s',
@@ -132,21 +142,10 @@ export function callFastModel(payload, config) {
     encoding: 'utf8',
     timeout: (timeoutSec + 2) * 1000  // spawnSync timeout > curl max-time
   })
-  
+
   if (result.error || result.status !== 0) return null
-  
-  try {
-    const response = JSON.parse(result.stdout)
-    if (response.error) {
-      handleApiError(response.error)
-      return null
-    }
-    const content = response.choices?.[0]?.message?.content
-    if (!content) return null
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
+  // parseModelResponse → extractJsonContent：容忍裸 JSON / ```json 代码围栏 / 前后散文三种形态
+  return parseModelResponse(result.stdout)
 }
 
 // pending warning — drained on next emit()
@@ -184,22 +183,25 @@ function circuitFile() {
 }
 
 // 检查是否处于熔断状态。返回 true 表示熔断中，应跳过 API 调用。
-export function checkCircuitBreaker() {
+// 关键：冷却窗内仍需 failure_count >= 阈值 才算“开启”——单次瞬时失败只回退、不熔断。
+export function checkCircuitBreaker(config) {
   const file = circuitFile()
-  if (!fs.existsSync(file)) return false
-  
   let circuit
-  try { circuit = JSON.parse(fs.readFileSync(file, 'utf8')) }
-  catch { return false }
-  
-  const cooldownMs = COOLDOWN_MINUTES * 60 * 1000
-  if (Date.now() - circuit.last_failure_at < cooldownMs) {
-    return true  // 仍在冷却期，熔断中
+  try {
+    if (!fs.existsSync(file)) return false
+    circuit = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    return false
   }
-  
-  // 冷却期已过，自动重置
-  try { fs.unlinkSync(file) } catch {}
-  return false
+  const cooldownMin = config?.circuit_breaker_cooldown_minutes ?? COOLDOWN_MINUTES
+  const cooldownMs = cooldownMin * 60 * 1000
+  if (Date.now() - (circuit.last_failure_at || 0) >= cooldownMs) {
+    // 冷却期已过，无论累计多少次都自动重置
+    try { fs.unlinkSync(file) } catch {}
+    return false
+  }
+  // 冷却窗内：仅当累计失败达到阈值才开启
+  return (circuit.failure_count || 0) >= CIRCUIT_THRESHOLD
 }
 
 // API 调用失败时调用。返回 true 表示本次失败触发了熔断。
@@ -255,23 +257,27 @@ if (!result) {
 
 #### System Prompt
 
+> 以下为 `prompts.mjs` 中 `OPTIMIZATION_SYSTEM` 的真实文本（10 条规则，与 §5 一致）。
+
 ```
 You are a prompt optimizer for Claude Code, a professional AI coding assistant.
 Your job is to transform the user's input into an optimal English execution prompt.
 
 Rules (strictly follow all):
-1. NEVER change the user's intent.
-2. NEVER add requirements not implied by the user.
-3. PRESERVE code blocks, commands, file paths, variable names, package names, 
-   error messages, URLs, branch names, and all technical identifiers exactly as-is.
-4. OPTIMIZE for Claude Code: use imperative mood, specify boundaries clearly,
-   add structure for complex tasks, clarify analysis vs. implementation intent.
-5. If the user asks for analysis only, do NOT turn it into implementation.
-6. If the user asks to implement, preserve that intent exactly.
-7. If ambiguous, add MINIMAL clarification only.
-8. OUTPUT valid JSON only. No explanation. No markdown.
+1. Do not change the user's intent.
+2. Do not add requirements that are not implied by the user.
+3. Preserve code blocks, commands, logs, paths, identifiers, URLs, branch names, package names, and error messages.
+4. Optimize the prompt for Claude Code usage.
+5. Prefer clear task boundaries.
+6. If the user asks for analysis, do not turn it into implementation.
+7. If the user asks to implement, preserve that intent.
+8. If the original prompt is ambiguous, add only minimal clarification.
+9. Output valid JSON only.
+10. Never expose secrets or sensitive values in generated content.
 
 Additional domain terms to preserve: {domain_terms}
+
+Output JSON with fields: detected_input_language, execution_prompt_en, rewrite_type, key_changes
 ```
 
 #### User Message

@@ -1,6 +1,8 @@
 # MVP 范围与实现路线图
 
-版本：v0.2
+版本：v0.2（**历史规划文档**）
+
+> ⚠️ 本文是 v0.1/v0.2 阶段的原始范围与路线图，保留作背景。**当前实现状态请以 [`INDEX.md`](./INDEX.md) 为准**：现已到 v0.6（SQLite 已于 v0.5 落地、Stop/SessionStart hook 已加、256 单元 + 14 集成测试）。文中 `/my-lingo:status` 现名为 `/my-lingo:info`；语言检测为二分类（无 `mixed`）；JSONL 已被 SQLite 取代。
 
 ---
 
@@ -197,10 +199,15 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 
 ---
 
-### v1.0 里程碑：SQLite 迁移
+### v0.5 里程碑：SQLite 迁移（✅ 已完成，原计划列为 v1.0）
 
 **新增功能**：
-- SQLite 迁移（从 JSONL 迁移）
+- SQLite 迁移（`node:sqlite`，单库 5 表，WAL）；不迁移旧 JSONL（未发布）
+
+### v0.4 / v0.6 里程碑（路线图补记）
+
+- v0.4：Stop hook + Claude 回复捕获（`responses` 表）
+- v0.6：SessionStart 补偿触发 + `analysis.lock`（Phase 1 已落地；Phase 2 阈值兜底待实施）
 
 ---
 
@@ -261,7 +268,7 @@ MVP（v0.1）的目标是**打通一个完整的最小闭环**，验证：
 
 ## 5. 验收测试清单（v0.1 发布前）
 
-> v0.1 MVP 代码实现已完成（88 单元测试通过）。以下清单区分"单元测试已覆盖"和"需要真实 API/会话的集成测试"（见 `PENDING_TESTS.md`）。
+> 本清单为 v0.1 发布前的验收项（当时 88 单元测试）。截至 v0.6 已增长到 **256 单元 + 14 集成测试**；最新测试说明见 [`11-integration-tests.md`](./11-integration-tests.md)。
 
 ### 功能测试
 

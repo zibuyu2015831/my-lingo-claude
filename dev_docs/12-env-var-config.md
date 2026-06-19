@@ -93,10 +93,10 @@ export function writeConfig(config) {
 
 不再有任何"请输入 API Key"的交互步骤。
 
-### 3.3 `commands/my-lingo/status.md`（调整）
+### 3.3 `commands/my-lingo/info.md`（调整；命令早期叫 `status`，已重命名为 `info`）
 
 - 移除"config.json 不存在则退出"的前置检查（凭证改走环境变量后，config.json 可能不存在）
-- 显示 API 配置来源标注：`(env)` 或 `(config.json)`
+- 显示 API 配置来源标注：优先 `CLAUDE_PLUGIN_OPTION_*`，回退 `MY_LINGO_*`，再否则"未设置"
 - 若凭证未配置，提示运行 `/my-lingo:setup`
 
 ### 3.4 `dev_docs/07-storage.md`（文档更新）
@@ -120,7 +120,7 @@ export function writeConfig(config) {
 - `loadConfig()` 在所有文件层（Layer 1、Layer 3）读取时主动过滤掉凭证字段，文件中即使存在这些字段也被完全忽略
 - `writeConfig()` 写入前同样过滤，凭证字段永远不落地
 - `getApiKey(config)` 直接返回 `config.api_key`，无冗余的 env var 二次检查（`loadConfig` 已在 Layer 0 统一处理）
-- 凭证的唯一合法来源：`MY_LINGO_*` 环境变量
+- 凭证的合法来源：**plugin.json userConfig（注入为 `CLAUDE_PLUGIN_OPTION_*`）优先，`MY_LINGO_*` 环境变量兜底**（与 §2.2 一致）；**绝不来自文件**
 
 ---
 
@@ -136,6 +136,6 @@ export function writeConfig(config) {
 
 1. `scripts/lib/config.mjs` — 添加 Layer 0，修改 writeConfig
 2. `commands/my-lingo/setup.md` — 重写
-3. `commands/my-lingo/status.md` — 调整
+3. `commands/my-lingo/info.md`（原 `status.md`）— 调整
 4. `dev_docs/07-storage.md` — 更新
 5. `README.md` + `README.zh.md` — 添加环境变量章节

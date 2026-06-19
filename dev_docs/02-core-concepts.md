@@ -1,6 +1,6 @@
 # 核心概念设计
 
-版本：v0.2
+版本：v0.6
 
 ---
 
@@ -117,36 +117,40 @@ off：
 
 ### 3.1 本地检测算法
 
-不调用外部 API，使用 ASCII 比率启发式算法（< 1ms）：
+不调用外部 API，使用 ASCII 比率启发式算法（< 1ms）。**二分类**，无 mixed/cjk 中间态：
 
 ```javascript
+// detect.mjs — ratio 为 0–100 整数；lang 只有 'en' / 'non-english'
 function detectLanguage(text) {
+  if (!text || text.trim().length === 0) return { lang: 'en', ratio: 100 }
   const chars = [...text]
-  let asciiCount = 0
-  for (const ch of chars) {
-    const code = ch.charCodeAt(0)
-    if (code >= 0x20 && code <= 0x7E) asciiCount++
+  const asciiCount = chars.filter(c => {
+    const code = c.charCodeAt(0)
+    return code >= 0x20 && code <= 0x7e
+  }).length
+  const ratio = Math.round((asciiCount / chars.length) * 100)
+  return {
+    lang: ratio >= 85 ? 'en' : 'non-english',  // ≥85% ASCII 视为英文，否则一律 non-english
+    ratio,
   }
-  const ratio = asciiCount / chars.length
-
-  if (ratio >= 0.85) return { lang: 'en', mode: 'correct' }   // 英文为主
-  if (ratio <= 0.30) return { lang: 'cjk', mode: 'translate' } // CJK 为主
-  return { lang: 'mixed', mode: 'translate' }                   // 混合（中英夹杂）
 }
 ```
 
+> 凡 `non-english` 都照常走优化路径；不存在 `mixed`/`cjk`/`mode`/`confidence` 字段。优化时英文技术词由优化器 system prompt 负责保留。
+
 ### 3.2 跳过逻辑
 
-以下情况直接跳过处理：
+`shouldSkip()` 命中以下情况直接跳过处理：
 - `prompt.startsWith('/')` → slash 命令
-- `prompt.startsWith('!')` → shell 命令
-- `[...prompt].length < 8` → 过短
+- 字符数 `< 8` **且** 词数 `< 3` → 过短（CJK 无空格时用字符数兜底）
 - 纯代码块（以 ` ``` ` 开头）
 - URL / git / npm / docker 等命令前缀
 
-特殊前缀：
-- `::` → 强制进入 refine 模式（无论 auto_correct 设置如何）
-- `--` → 本次强制跳过优化
+> `!` 前缀**不在** `shouldSkip` 中：Claude Code 在 UI 层就把 `!foo` 当终端命令执行，消息根本不进 hook（见 [`13-raw-prefix-rename.md`](./13-raw-prefix-rename.md)）。
+
+特殊前缀（在 `shouldSkip` 之前于 `user-prompt-submit.mjs` 分流）：
+- `::` → 强制进入 refine 模式；**绕过 `shouldSkip`**，使 ":: fix" 等短输入也能处理
+- `--` → 本次强制跳过优化，仅记录并透传（mode:'raw'）
 
 ---
 
@@ -176,32 +180,37 @@ function detectLanguage(text) {
 
 ## 5. 配置层级
 
-配置按以下优先级合并（高优先级覆盖低优先级）：
+配置按以下优先级合并（高优先级覆盖低优先级，见 `config.mjs::loadConfig`）：
 
 ```
-本次输入 inline override（如 -- 前缀）
-  > 项目级配置（.claude-my-lingo.json in cwd）
-  > 当前语言空间配置（spaces.json 中对应 space）
-  > 全局配置（config.json）
-  > 插件默认值
+Layer 0（最高）：API 凭证（仅来自环境变量：CLAUDE_PLUGIN_OPTION_* > MY_LINGO_*）
+  > Layer 1：项目级配置（.claude-my-lingo.json in cwd，凭证字段被过滤）
+  > Layer 2：当前语言空间配置（spaces.json：target_language / native_language / display_mode / overrides）
+  > Layer 3：全局配置（config.json，凭证字段被过滤）
+  > Layer 4（最低）：插件内置默认值（DEFAULT_CONFIG）
 ```
+
+> 凭证字段（`api_key` / `api_base_url` / `model_fast` / `model_deep`）属 `CREDENTIAL_FIELDS`：**只从环境变量读取，永不从/向文件读写**（见 [`12-env-var-config.md`](./12-env-var-config.md)）。
 
 ### 5.1 全局配置（config.json）
 
+只存**偏好类**字段（凭证不落盘）。完整默认值见 `config.mjs::DEFAULT_CONFIG`：
+
 ```json
 {
-  "api_base_url": "https://api.openai.com/v1",
-  "model_fast": "gpt-4o-mini",
-  "model_deep": "gpt-4o",
-  "timeout_seconds": 8,
-  "fallback_policy": "send_original",
   "execution_mode": "english_optimized",
   "native_language": "zh-CN",
-  "default_target_language": "en",
+  "timeout_seconds": 8,
+  "fallback_policy": "send_original",
   "privacy_mode": "standard",
   "max_prompt_length": 4000,
-  "display_mode": "compact",
-  "response_language_mode": "off"
+  "circuit_breaker_cooldown_minutes": 5,
+  "display_mode": "full",
+  "target_language": "en",
+  "response_language_mode": "off",
+  "summary_language_mode": "off",
+  "deep_timeout_seconds": 55,
+  "deep_max_tokens": 4096
 }
 ```
 
@@ -218,17 +227,16 @@ function detectLanguage(text) {
 
 ## 6. Display Mode（展示模式）
 
-每个语言空间有独立展示模式配置：
+控制 `systemMessage`（终端可见）的详细程度。当前 `buildSystemMessage` 实际只区分两态：
 
 | 模式 | 含义 |
 |------|------|
-| `off` | 不展示任何学习内容 |
-| `compact` | systemMessage 显示简短优化结果 + 1-2 个关键学习点（默认）|
-| `full` | systemMessage 显示完整的 original / execution_prompt / learning_text |
-| `execution_only` | 只展示执行 Prompt，不展示学习内容 |
-| `learning_only` | 只展示学习文本，不展示执行 Prompt |
+| `full` | systemMessage 显示完整 execution_prompt（**默认**，`DEFAULT_CONFIG.display_mode = 'full'`）|
+| `compact` | systemMessage 截断到前 150 字符 |
 
-注意：`systemMessage` 是在 Claude Code 终端界面显示给用户的内容，`additionalContext` 是注入给 Claude 的内容，两者独立配置。
+> 历史文档曾列出 `off` / `execution_only` / `learning_only`，**均未实现**——任何非 `compact` 的值都按 `full` 处理。`display_mode` 可在全局 config.json 或语言空间字段设置。
+>
+> 注意：`systemMessage` 显示给用户，`additionalContext` 注入给 Claude，两者独立。
 
 ---
 
@@ -253,8 +261,7 @@ function detectLanguage(text) {
 
 | 模式 | 行为 |
 |------|------|
-| `standard` | 脱敏后发给外部 API，本地 JSONL 存原始内容 |
-| `strict` | 脱敏后发给外部 API，本地 JSONL 也只存脱敏内容 |
+| `standard` | 出站前脱敏（`redactMessages`）；本地 `data.db` **始终存原文**（默认）|
 | `off` | 不脱敏（适合使用本地 API 时）|
 
-脱敏覆盖范围：API keys、密码、用户名路径、私有 IP、连接字符串中的密码段。详见 `09-privacy-security.md`。
+> `strict`（本地也脱敏）在历史文档中出现过，但**当前未实现**——除 `off` 外的任何值都按 `standard` 处理。脱敏覆盖：API keys、密码、用户名路径、私有 IP、连接字符串密码段、PEM 私钥、AWS key。详见 [`09-privacy-security.md`](./09-privacy-security.md)。

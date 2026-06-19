@@ -1,57 +1,57 @@
 # 系统架构设计
 
-版本：v0.2
+版本：v0.6
 
 ---
 
 ## 1. 整体架构
 
+> 存储自 v0.5 起为 SQLite（单库 `data.db`）；v0.4 加入 Stop hook 捕获回复；v0.6 加入 SessionStart 补偿触发。
+
 ```
 用户输入
    │
    ▼
-UserPromptSubmit Hook（Node.js，同步）
+UserPromptSubmit Hook（Node.js，同步；hook 超时 60s，API 调用超时 8s）
    │
-   ├─ 跳过检测（slash命令/纯代码/过短）→ 直接通过
-   │
-   ├─ 语言检测（本地 ASCII 比率，< 1ms）
-   │
-   ├─ 读取配置（config.json + spaces.json）
-   │
+   ├─ 前缀分流：-- 跳过优化(记 raw) / :: 进入 refine（均先于 shouldSkip）
+   ├─ 跳过检测（slash命令 '/' / 纯代码 / 过短 / URL·shell前缀）→ 直接通过
+   ├─ 读取配置（config.json + spaces.json，5 层合并）
+   ├─ 语言检测（本地 ASCII 比率，< 1ms，二分类 en/non-english）
    ├─ execution_mode 解析
    │   ├─ off → 直接通过
    │   ├─ original → 记录 + 直接通过
-   │   └─ english_optimized / mixed / preview
-   │       └─ 调用外部 API（curl, 同步, 超时 8s）
-   │           ├─ 成功 → 生成 execution_prompt_en
-   │           └─ 失败/超时 → fallback_policy
-   │
-   ├─ 写入 turns JSONL（今日文件追加）
-   │
+   │   └─ english_optimized / original_with_english_context / preview
+   │       └─ 熔断检查 → 调用外部 fast model（curl, 同步, --max-time 8s, 出站脱敏）
+   │           ├─ 成功 → execution_prompt_en（recordApiSuccess）
+   │           └─ 失败/超时 → recordApiFailure → fallback_policy
+   ├─ 写入 turns（DB，analyzed=0）
    └─ 返回 { additionalContext, systemMessage }
               │
               ▼
-        Claude Code 执行
+        Claude Code 执行 → Claude 回复给用户
               │
               ▼
-       Claude 回复给用户
+     Stop Hook（每轮回复后）：尾读 transcript，写 responses（DB），< 200ms，无 API
               │
               ▼
-     SessionEnd Hook（Node.js）
+     SessionEnd Hook（会话结束）
               │
-              ├─ 读取本次会话的 turns 记录
-              ├─ 统计 corrections / translations / clean
-              ├─ 识别本次会话的高频错误
-              ├─（v0.2+）批量调用 deep model 生成学习摘要
-              └─ stderr 输出会话统计
+              ├─ readUnanalyzedTurns（DB，analyzed=0）；空则退出（幂等）
+              ├─ 统计 optimized / translated / corrected / fallbacks / raws → stderr
+              ├─（v0.2+）读 responses，批量调用 deep model 生成 corrections/learning_items
+              └─ 单事务：写 corrections/items/sessions + markTurnsAnalyzed（网络调用在事务外）
+
+     SessionStart Hook（新会话启动，v0.6）
+       └─ 若有其他 session 的未分析 turns 且 analysis.lock 不新鲜 → detached spawn session-end.mjs
 
 用户执行命令（/my-lingo:xxx）
    │
    ▼
 commands/my-lingo/*.md（Claude workflow）
    │
-   ├─ 读取 JSONL 文件（turns / learning / errors）
-   ├─（按需）调用外部 API 生成课程/画像
+   ├─ 经 install.json 指针定位 → import scripts/lib/* → 读 data.db
+   ├─（按需）调用外部 deep model 生成课程/画像
    └─ 格式化输出给用户
 ```
 
@@ -71,15 +71,18 @@ My Lingo 不使用持久后台进程。原因：
 ```
 [用户按 Enter]
      → Claude Code 启动 UserPromptSubmit hook 进程
-     → hook 脚本同步执行（最多 8-60s）
-     → hook 进程写入 JSONL，输出 JSON 到 stdout
+     → hook 脚本同步执行（API curl 超时 8s；hook 配置超时 60s）
+     → hook 进程写入 turns（data.db），输出 JSON 到 stdout
      → hook 进程退出
      → Claude Code 读取 hook 输出，注入 additionalContext
      → Claude 开始处理 prompt
 
-[Claude 完成回复]
+[每轮回复完成]
+     → Claude Code 启动 Stop hook 进程 → 尾读 transcript，写 responses（data.db），< 200ms
+
+[会话结束]
      → Claude Code 启动 SessionEnd hook 进程
-     → SessionEnd hook 读取 JSONL，输出会话统计到 stderr
+     → 读 data.db（未分析 turns + responses），分析后单事务提交，统计输出 stderr
      → hook 进程退出
 ```
 
@@ -141,8 +144,8 @@ async function main() {
     exit(0)
   }
   
-  // 写入 JSONL
-  writeTurn({ ...detection, execution_prompt: result.execution_prompt })
+  // 写入 turns（data.db）
+  writeTurn({ ...detection, execution_prompt: result.execution_prompt }, config)
   
   // 输出给 Claude Code
   emit({
@@ -165,18 +168,19 @@ async function main() {
 
 ## 4. SessionEnd 路径
 
-SessionEnd hook 在 Claude 会话结束时触发，可以执行较长时间（timeout: 15s）。
+SessionEnd hook 在 Claude 会话结束时触发，可执行较长时间（`hooks.json` 配置 timeout: **60s**；deep model 调用上限 `deep_timeout_seconds`=55s，必须小于 hook 超时）。
 
 ### 4.1 职责
 
 ```javascript
-// SessionEnd hook
-1. 读取今日 turns 文件
-2. 过滤本次 session_id 的 turns
-3. 统计：总数 / 优化数 / 翻译数 / fallback 数
-4. 识别高频错误对（参考实现的 bucket by (original, corrected)）
-5. stderr 输出摘要（终端可见）
-6. （v0.2+）批量写入 learning items JSONL
+// SessionEnd hook（session-end.mjs）
+1. readUnanalyzedTurns(sessionId)：DB 中 analyzed=0 的 turns；空 → 退出（幂等）
+2. 统计：总数 / optimized / translated / corrected / fallbacks / raws
+3. stderr 输出摘要（终端可见）
+4. readResponsesForSession：读本 session 的 Claude 回复（DB）
+5. （v0.2+）buildAnalysisMessages → callDeepModel（网络调用，置于事务外）
+6. 单事务：写 corrections/learning_items/sessions + markTurnsAnalyzed(ids) 原子提交
+7. finally：释放 analysis.lock（v0.6）
 ```
 
 ### 4.2 输出格式
@@ -199,7 +203,7 @@ Recurring this session: "have → has" (3x), "missing article" (2x)
      ↓
 Claude 读取 commands/my-lingo/lesson.md
      ↓
-workflow 指令：读取最近 7 天的 turns JSONL + learning JSONL
+workflow 指令：经 storage.mjs 从 data.db 读取最近 7 天的 turns + corrections
      ↓
 （有 deep model 配置时）调用外部 API 生成课程内容
      ↓
@@ -212,26 +216,23 @@ workflow 指令：读取最近 7 天的 turns JSONL + learning JSONL
 
 ## 6. 文件 I/O 设计
 
-### 6.1 读取模式
+### 6.1 读写模式（v0.5 起为 SQLite）
 
-| 操作 | 文件 | 频率 |
+| 操作 | 介质 | 频率 |
 |------|------|------|
-| 读配置 | `config.json` | 每次 hook 调用 |
-| 读语言空间 | `spaces.json` | 每次 hook 调用 |
-| 读熔断状态 | `circuit.json` | 每次 hook 调用 |
-| 写 turn | `turns/YYYY-MM-DD.jsonl` | 每次 hook 调用（追加）|
-| 读历史 | `turns/YYYY-MM-DD.jsonl` | 命令执行时 |
-| 写学习项 | `learning/{space}/items-YYYY-MM.jsonl` | SessionEnd |
-| 读/写熔断 | `circuit.json` | API 失败时 |
+| 读配置 | `config.json`（JSON） | 每次 hook 调用 |
+| 读语言空间 | `spaces.json`（JSON） | 每次 hook 调用 |
+| 读/写熔断 | `circuit.json`（JSON） | API 失败/成功时 |
+| 写 turn | `data.db` → `turns` 表 | 每次 UserPromptSubmit |
+| 写 response | `data.db` → `responses` 表 | 每次 Stop |
+| 写 corrections/items/sessions | `data.db` | SessionEnd（单事务）|
+| 读历史 | `data.db`（按 `substr(ts,1,10/7)` 切片查询）| 命令执行时 |
 
-### 6.2 文件大小预估
+读写经 `storage.mjs` → `db.mjs`（`getDb()` 单例 + WAL + `busy_timeout=3000`），多 hook 进程并发由 SQLite 串行化写入，无需应用层锁。
 
-每条 turn 记录约 200-500 字节（JSONL）。假设每天 50 次 prompt：
-- 每日文件：~25KB
-- 每月文件：~750KB
-- 一年后：~9MB
+### 6.2 规模与性能
 
-JSONL 文件是顺序写入、按需读取，I/O 压力极低。
+WAL 单库，单条 turn ~数百字节。日常 50 prompt/天量级下，索引查询（`idx_turns_ts` / `idx_turns_analyzed` 等）足够快；连接构造用 `PRAGMA user_version` 短路 initSchema，避免每轮重复建表（F12）。
 
 ---
 

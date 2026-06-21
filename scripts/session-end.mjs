@@ -102,21 +102,34 @@ function main() {
         return
       }
 
+      // Cap how many target turns one run sends in a single deep call. An
+      // oversized batch blows past deep_timeout_seconds on slow reasoning models,
+      // and the whole batch's learning data is lost. Leftover targets stay
+      // unanalyzed and drain over subsequent SessionStart catchup runs.
+      const batchSize = config.analysis_batch_size ?? 5
+      const batch = analysisTargets.slice(0, batchSize)
+      const batchIds = batch.map(r => r.id)
+      // Non-target turns (fallback / raw / original) need no analysis — mark them
+      // processed alongside the batch so they are not reconsidered next time.
+      const targetIdSet = new Set(analysisTargets.map(r => r.id))
+      const nonTargetIds = ids.filter(id => !targetIdSet.has(id))
+
       // ① Network call OUTSIDE the transaction (slow, may fail).
       const responses = readResponsesForSession(sessionId, today)
       debugLog('SESSION_ANALYSIS_START', {
         targets: analysisTargets.length,
+        batch: batch.length,
         responses: responses.length,
         space,
       }, config)
 
-      const messages = buildAnalysisMessages(analysisTargets, config, responses)
-      // config.deep_timeout_seconds (default 55) sized for slow reasoning models;
-      // it MUST stay below the SessionEnd hook timeout in hooks.json (60), or
-      // Claude Code kills the hook before the analysis can commit. A timed-out
-      // analysis still marks turns analyzed below, so an undersized budget
-      // permanently loses those turns' learning data.
-      const deepTimeout = config.deep_timeout_seconds ?? 55
+      const messages = buildAnalysisMessages(batch, config, responses)
+      // config.deep_timeout_seconds (default 120) sized for slow reasoning models;
+      // it MUST stay below the SessionEnd hook timeout in hooks.json (125), or
+      // Claude Code kills the live hook before the analysis can commit. A failed
+      // call no longer marks turns analyzed (see below), so a transient timeout is
+      // retried on the next catchup instead of permanently losing learning data.
+      const deepTimeout = config.deep_timeout_seconds ?? 120
       const result = messages ? callDeepModel(messages, config, { maxTimeSeconds: deepTimeout }) : null
 
       debugLog('SESSION_ANALYSIS_RESULT', {
@@ -125,15 +138,24 @@ function main() {
         learning_points: result?.learning_points?.length ?? 0,
       }, config)
 
+      // Analysis call failed (timeout / API error): mark NOTHING. The turns stay
+      // unanalyzed and are retried on the next SessionStart catchup, so a slow
+      // model that times out does not silently discard learning data (the failure
+      // mode the original "mark analyzed regardless" code warned about).
+      if (!result) {
+        debugLog('SESSION_ANALYSIS_FAILED', { session_id: sessionId }, config)
+        return
+      }
+
       // ② DB writes + analyzed flag committed atomically: a crash mid-write
       //    rolls back entirely, so a rerun never produces duplicate corrections.
       const db = getDb()
       db.exec('BEGIN')
       try {
-        for (const c of (result?.corrections ?? [])) {
+        for (const c of (result.corrections ?? [])) {
           writeCorrection({ ...c, session_id: sessionId, turn_id: null }, space)
         }
-        for (const item of (result?.learning_points ?? [])) {
+        for (const item of (result.learning_points ?? [])) {
           writeLearningItem({ ...item, language_space: space }, space)
         }
         // Skip in catchup mode (sessionId=null): NULL doesn't trigger REPLACE in
@@ -148,15 +170,20 @@ function main() {
             corrected: corrected.length,
             fallbacks: fallbacks.length,
             raws: raws.length,
-            top_errors: result?.corrections?.slice(0, 3).map(c => ({
+            top_errors: result.corrections?.slice(0, 3).map(c => ({
               pattern: c.pattern ?? c.type,
               count: 1,
             })) ?? [],
           })
         }
-        markTurnsAnalyzed(ids)
+        // Mark only the batch we actually analyzed plus the non-target turns;
+        // any targets beyond batchSize stay unanalyzed for the next catchup run.
+        markTurnsAnalyzed([...batchIds, ...nonTargetIds])
         db.exec('COMMIT')
-        debugLog('SESSION_COMMIT', { session_id: sessionId }, config)
+        debugLog('SESSION_COMMIT', {
+          session_id: sessionId,
+          marked: batchIds.length + nonTargetIds.length,
+        }, config)
       } catch (e) {
         try { db.exec('ROLLBACK') } catch {}
         debugLog('SESSION_ROLLBACK', { error: e?.message ?? String(e) }, config)

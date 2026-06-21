@@ -24,7 +24,7 @@ test('loadConfig: missing config.json returns DEFAULT_CONFIG', () => {
   withTempData(() => {
     const cfg = loadConfig(null)
     assert.equal(cfg.execution_mode, 'english_optimized')
-    assert.equal(cfg.timeout_seconds, 8)
+    assert.equal(cfg.timeout_seconds, 15)
     assert.equal(cfg.privacy_mode, 'standard')
     assert.equal(cfg.fallback_policy, 'send_original')
     assert.ok(Array.isArray(cfg.domain_terms))

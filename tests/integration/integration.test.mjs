@@ -336,6 +336,45 @@ test('PT-010: session-end — raw-only turns skip analysis, no corrections file'
   }
 })
 
+// ── PT-010b: failed deep analysis must NOT mark turns analyzed ───────────────
+// Regression guard: older builds marked turns analyzed=1 even when the deep call
+// failed, permanently losing learning data. A failure must leave the turns
+// unanalyzed so the next SessionStart catchup retries them.
+
+test('PT-010b: session-end — analysis API failure leaves turns unanalyzed, writes nothing', () => {
+  const dataDir = makeTmpDir()
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const sessionId = 'test-session-010b'
+
+    writeConfig(dataDir, {
+      execution_mode: 'english_optimized',
+      native_language: 'zh-CN',
+      api_base_url: 'http://127.0.0.1:1', // connection refused → callDeepModel returns null
+      model_fast: 'test-model',
+      deep_timeout_seconds: 2,
+    })
+
+    seedTurns(dataDir, [
+      { session_id: sessionId, mode: 'english_optimized', execution_prompt: 'Review this.', original_prompt: 'kan kan', detected_language: 'zh-CN', fallback: false },
+      { session_id: sessionId, mode: 'english_optimized', execution_prompt: 'Fix this.', original_prompt: 'xiu yi xiu', detected_language: 'zh-CN', fallback: false },
+    ])
+
+    const r = runSessionEnd({ dataDir, sessionId, env: { MY_LINGO_API_KEY: 'sk-test' } })
+    assert.equal(r.status, 0, `session-end should exit 0, got ${r.status}, stderr: ${r.stderr}`)
+
+    const currentMonth = today.slice(0, 7)
+    assert.equal(dbCall(dataDir, 'readCorrections', ['english', [currentMonth]]).length, 0, 'no corrections on failure')
+    assert.equal(dbCall(dataDir, 'readLearningItems', ['english', [currentMonth]]).length, 0, 'no learning items on failure')
+
+    // The crux: turns stay unanalyzed so a future catchup retries them.
+    const unanalyzed = dbCall(dataDir, 'readUnanalyzedTurns', [sessionId])
+    assert.equal(unanalyzed.length, 2, 'turns must remain unanalyzed after a failed analysis')
+  } finally {
+    cleanup(dataDir)
+  }
+})
+
 // ── PT-011: generate-lesson.mjs generates lesson via mock server ──────────────
 
 test('PT-011: generate-lesson.mjs — creates lesson file and outputs markdown', async () => {

@@ -19,10 +19,15 @@ const DEFAULT_CONFIG = {
   response_language_mode: 'off',
   summary_language_mode: 'off', // 'off' | 'native' — append a native-language summary to each reply
   // Deep model (session analysis + lesson generation) budgets. Defaults are sized
-  // for slow reasoning models (e.g. gemini-2.5-pro ~24s, heavy reasoning tokens);
-  // the SessionEnd hook timeout in hooks.json must stay above deep_timeout_seconds.
-  deep_timeout_seconds: 55,
+  // for slow reasoning models (e.g. gemini-2.5-pro measured ~45s for a 3-turn batch,
+  // heavy reasoning tokens); the SessionEnd hook timeout in hooks.json (125) must
+  // stay above deep_timeout_seconds, or Claude Code kills the live hook before the
+  // analysis can commit. analysis_batch_size caps how many target turns each run
+  // sends in one call, keeping a single batch comfortably inside this budget even
+  // on slow models; leftover turns drain via SessionStart catchup.
+  deep_timeout_seconds: 120,
   deep_max_tokens: 4096,
+  analysis_batch_size: 5,
 }
 
 const DEFAULT_SPACE = {

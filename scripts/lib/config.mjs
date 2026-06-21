@@ -8,7 +8,7 @@ const CREDENTIAL_FIELDS = new Set(['api_key', 'api_base_url', 'model_fast', 'mod
 const DEFAULT_CONFIG = {
   execution_mode: 'english_optimized',
   native_language: 'zh-CN',
-  timeout_seconds: 8,
+  timeout_seconds: 15,
   fallback_policy: 'send_original',
   privacy_mode: 'standard',
   max_prompt_length: 4000,

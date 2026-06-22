@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   startMockServer, stopServer,
-  makeSuccessHandler, makeAuthErrorHandler, makeMarkdownHandler,
+  makeSuccessHandler, makeAuthErrorHandler, makeMarkdownHandler, makeSlowHandler,
 } from './mock-server.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -69,12 +69,13 @@ test('PT-002: circuit breaker — transient failures retry; opens only after the
     const credEnv = { MY_LINGO_API_BASE_URL: 'http://127.0.0.1:1', MY_LINGO_MODEL_FAST: 'test' }
 
     // Attempts 1 & 2: a single/double transient blip must NOT pause the API —
-    // each still attempts the call and reports "API unavailable".
+    // each still attempts the call. Port 1 is connection-refused, so the message
+    // is the specific "API unreachable", not the generic "API unavailable".
     for (const attempt of [1, 2]) {
       const r = runHookSync(prompt, { dataDir, env: credEnv })
       assert.equal(r.status, 0, `attempt ${attempt} exits 0`)
-      assert.ok(r.json?.systemMessage?.includes('API unavailable'),
-        `attempt ${attempt} should say "API unavailable", got: ${r.json?.systemMessage}`)
+      assert.ok(r.json?.systemMessage?.includes('API unreachable'),
+        `attempt ${attempt} should say "API unreachable", got: ${r.json?.systemMessage}`)
       assert.equal(readCircuitJson(dataDir).failure_count, attempt, `failure_count after attempt ${attempt}`)
     }
 
@@ -91,6 +92,36 @@ test('PT-002: circuit breaker — transient failures retry; opens only after the
       `attempt 4 should say "Circuit breaker open", got: ${r4.json?.systemMessage}`)
   } finally {
     cleanup(dataDir)
+  }
+})
+
+// ── PT-002c: a slow model is reported as a timeout, not "API unavailable" ─────
+
+test('PT-002c: timeout — slow API reported as timed out + fallback_reason api_timeout', async () => {
+  // Server answers after 3s; client --max-time is 1s → curl aborts with exit 28.
+  const { server, port } = await startMockServer(makeSlowHandler(3000))
+  const dataDir = makeTmpDir()
+  try {
+    writeConfig(dataDir, baseConfig({ timeout_seconds: 1 }))
+    const r = await runHookAsync('请帮我检查这段代码有没有问题', {
+      dataDir,
+      env: { MY_LINGO_API_BASE_URL: `http://127.0.0.1:${port}`, MY_LINGO_MODEL_FAST: 'test' },
+    })
+
+    assert.equal(r.status, 0, 'hook exits 0')
+    assert.ok(/timed out/i.test(r.json?.systemMessage || ''),
+      `should report a timeout, got: ${r.json?.systemMessage}`)
+    assert.ok(!r.json?.systemMessage?.includes('unreachable'),
+      `timeout must not be conflated with unreachable, got: ${r.json?.systemMessage}`)
+
+    const today = new Date().toISOString().slice(0, 10)
+    const turns = readTurnsForDate(dataDir, today)
+    const last = turns[turns.length - 1]
+    assert.equal(last.fallback, true, 'turn marked as fallback')
+    assert.equal(last.fallback_reason, 'api_timeout', `fallback_reason should be api_timeout, got: ${last.fallback_reason}`)
+  } finally {
+    cleanup(dataDir)
+    await stopServer(server)
   }
 })
 

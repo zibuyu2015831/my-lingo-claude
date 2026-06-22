@@ -77,7 +77,7 @@ tests/
 - **场景**：API 端点不可达（指向 `http://127.0.0.1:1`，立即 connection refused）
 - **不需要 mock server**：curl 因 connection refused 立即退出
 - **验证**：
-  - 第 1~3 次调用 → 每次仍尝试调用 API，`systemMessage` 含 `API unavailable`，`circuit.json` 的 `failure_count` 依次为 1 / 2 / 3
+  - 第 1~3 次调用 → 每次仍尝试调用 API，`systemMessage` 含按失败类型区分的提示（connection refused → `API unreachable`，超时 → `Timed out`，等），`circuit.json` 的 `failure_count` 依次为 1 / 2 / 3
   - 第 4 次调用 → `systemMessage` 含 `Circuit breaker open`（熔断器已开启，跳过 API 调用）
 
 > **实现**：`checkCircuitBreaker(config)`（`api.mjs:129-147`）在冷却窗内返回 `failure_count >= CIRCUIT_THRESHOLD(3)` 才算开启——**单次瞬时失败只回退发原文、不熔断**。冷却时长读 `config.circuit_breaker_cooldown_minutes`（默认 5 分钟），到期自动删除 `circuit.json` 复位。此语义与 `00-decisions.md` D4 一致（这是 `15-architecture-review-v0.5.md` 的 F4 修复结果）。
@@ -203,7 +203,7 @@ PT-012 使用独立 `spawnSync` 子进程调用 `readItemsDue`，确保 `CLAUDE_
 `PENDING_TESTS.md` 中 PT-002 的描述："Attempts 1–3 return API unavailable; attempt 4 returns Circuit breaker open"，**与当前实现一致**。
 
 **实际行为**（由集成测试 PT-002 验证）：
-- 第 1~3 次失败 → 每次仍调用 API，报 `API unavailable`，`circuit.json` 的 `failure_count` 累加到 3
+- 第 1~3 次失败 → 每次仍调用 API，报按失败类型区分的提示（connection refused → `API unreachable`），`circuit.json` 的 `failure_count` 累加到 3
 - 第 4 次（5 分钟冷却窗内）→ `Circuit breaker open`，跳过 API 调用
 
 原因：`checkCircuitBreaker(config)` 在冷却期内返回 `failure_count >= CIRCUIT_THRESHOLD(3)`；冷却到期则删除 `circuit.json` 并复位。

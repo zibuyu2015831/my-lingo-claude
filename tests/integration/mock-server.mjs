@@ -39,6 +39,18 @@ export function makeMarkdownHandler(markdownContent) {
   }
 }
 
+// Holds the connection open past the client's --max-time so curl aborts with a
+// timeout (exit 28). Used to prove a slow model is reported as a timeout, not a
+// generic "API unavailable".
+export function makeSlowHandler(delayMs, responseJson = { execution_prompt_en: 'too late' }) {
+  return (_req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(responseJson) } }] }))
+    }, delayMs)
+  }
+}
+
 // Simulates an invalid-API-key rejection from the provider.
 export function makeAuthErrorHandler() {
   return (_req, res) => {

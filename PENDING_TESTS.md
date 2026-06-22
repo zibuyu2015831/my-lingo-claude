@@ -35,7 +35,7 @@ Tests that cannot run in CI/`npm test` because they require external prerequisit
     echo "--- attempt $i ---"
   done
   ```
-- **Expected result**: Attempt 1 returns `[my-lingo] API unavailable, sending original prompt.`; attempt 2 returns `[my-lingo] Circuit breaker open — API paused, sending original.`; `circuit.json` exists in `$CLAUDE_PLUGIN_DATA/my-lingo/` with `failure_count=1`
+- **Expected result**: Attempts 1–2 return a failure-specific message (here, connection-refused → `[my-lingo] API unreachable — sending original prompt.`); the breaker trips on the 3rd consecutive failure, after which attempt 4 returns `[my-lingo] Circuit breaker open — API paused, sending original.`; `circuit.json` exists in `$CLAUDE_PLUGIN_DATA/my-lingo/` with `failure_count` accumulating per attempt
   > ⚠️ 原描述"3次失败后触发"有误：熔断器在**第1次失败后**即开启冷却窗口，详见 `dev_docs/11-integration-tests.md`。
 - **Verification status**: `[x]` **Automated** — `tests/integration/integration.test.mjs` (PT-002)
 

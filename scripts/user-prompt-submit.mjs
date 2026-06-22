@@ -9,6 +9,7 @@ import {
   recordApiFailure,
   recordApiSuccess,
   drainWarning,
+  drainFailure,
 } from './lib/api.mjs'
 import { buildOptimizationMessages, buildRefineMessages, buildSummaryLanguageCtx, buildResponseLanguageCtx } from './lib/prompts.mjs'
 import { debugLog } from './lib/debug.mjs'
@@ -59,6 +60,29 @@ function buildAdditionalContext(result, detection, config) {
   }
   return execPrompt + summaryCtx + responseLangCtx
 }
+
+// Translate a callFastModel() failure into the stored fallback_reason and the
+// short cause phrase shown to the user. Distinguishing these is the whole point:
+// a slow model timing out (raise timeout_seconds) is a different problem from a
+// dead endpoint, a bad key, or a garbled response — all of which previously read
+// as the same "API unavailable".
+const FAILURE_INFO = {
+  timeout:          (t) => ({ fallbackReason: 'api_timeout',     cause: `timed out (>${t}s)`,        hint: ' Raise timeout_seconds if this keeps happening.' }),
+  unreachable:      () => ({ fallbackReason: 'api_unreachable',  cause: 'API unreachable',           hint: '' }),
+  tls_error:        () => ({ fallbackReason: 'api_tls_error',    cause: 'TLS handshake failed',      hint: '' }),
+  auth:             () => ({ fallbackReason: 'api_auth',         cause: 'authentication failed',     hint: '' }),
+  invalid_response: () => ({ fallbackReason: 'api_bad_response', cause: 'unexpected API response',   hint: '' }),
+  no_api_key:       () => ({ fallbackReason: 'no_api_key',       cause: 'API key not set',           hint: ' Run /my-lingo:setup.' }),
+  not_configured:   () => ({ fallbackReason: 'not_configured',   cause: 'API not configured',        hint: ' Run /my-lingo:setup.' }),
+  api_error:        () => ({ fallbackReason: 'api_error',        cause: 'API unavailable',           hint: '' }),
+}
+
+function classifyFailure(failure, config) {
+  const make = FAILURE_INFO[failure?.reason] || FAILURE_INFO.api_error
+  return make(config.timeout_seconds || 8)
+}
+
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
 function buildSystemMessage(result, detection, latencyMs, config) {
   const effectiveLang = result.detected_input_language || detection.lang
@@ -170,8 +194,9 @@ function main() {
     // outbound path is covered uniformly — pass the raw text through.
     const result = callFastModel(buildRefineMessages(text, config), config)
     if (!result) {
+      const { cause, hint } = classifyFailure(drainFailure(), config)
       recordApiFailure(config)
-      emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
+      emit({ decision: 'block', reason: `[my-lingo] Refinement failed — ${cause}.${hint}` })
       return
     }
     recordApiSuccess(config)
@@ -222,6 +247,7 @@ function main() {
   const latencyMs = Date.now() - startTime
 
   if (!result) {
+    const { fallbackReason, cause, hint } = classifyFailure(drainFailure(), config)
     const tripped = recordApiFailure(config)
     try {
       writeTurn({
@@ -231,13 +257,13 @@ function main() {
         mode: config.execution_mode,
         latencyMs,
         fallback: true,
-        fallbackReason: 'api_error',
+        fallbackReason,
       }, config)
     } catch {}
     if (config.fallback_policy === 'send_original') {
       const msg = tripped
         ? '[my-lingo] Circuit breaker tripped — API paused for 5 min.'
-        : '[my-lingo] API unavailable, sending original prompt.'
+        : `[my-lingo] ${capitalize(cause)} — sending original prompt.${hint}`
       emit({ systemMessage: msg })
     }
     return

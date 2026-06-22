@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseModelResponse, extractJsonContent } from '../scripts/lib/api.mjs'
+import { parseModelResponse, extractJsonContent, classifyCurlFailure, callFastModel, drainFailure } from '../scripts/lib/api.mjs'
 
 // Wrap arbitrary message content in an OpenAI-compatible completion envelope.
 function envelope(content) {
@@ -58,4 +58,32 @@ test('parseModelResponse — missing content returns null', () => {
   assert.equal(parseModelResponse(JSON.stringify({ choices: [{ message: {} }] })), null)
   assert.equal(parseModelResponse('not json'), null)
   assert.equal(parseModelResponse(''), null)
+})
+
+// ── failure classification — distinguish timeout from a dead endpoint, etc. ───
+
+test('classifyCurlFailure — curl exit codes map to distinct reasons', () => {
+  assert.equal(classifyCurlFailure({ status: 28 }), 'timeout')      // --max-time exceeded
+  assert.equal(classifyCurlFailure({ status: 6 }), 'unreachable')   // DNS failure
+  assert.equal(classifyCurlFailure({ status: 7 }), 'unreachable')   // connection refused
+  assert.equal(classifyCurlFailure({ status: 35 }), 'tls_error')    // TLS handshake
+  assert.equal(classifyCurlFailure({ status: 60 }), 'tls_error')    // cert problem
+  assert.equal(classifyCurlFailure({ status: 22 }), 'api_error')    // any other nonzero
+})
+
+test('classifyCurlFailure — spawnSync timeout backstop is a timeout, other errors unreachable', () => {
+  assert.equal(classifyCurlFailure({ error: { code: 'ETIMEDOUT' } }), 'timeout')
+  assert.equal(classifyCurlFailure({ error: { code: 'ENOENT' } }), 'unreachable')
+})
+
+test('callFastModel — no API key reports no_api_key (not a generic failure)', () => {
+  assert.equal(callFastModel({ messages: [] }, {}), null)
+  assert.deepEqual(drainFailure(), { reason: 'no_api_key', detail: null })
+  // drained — a second read is clean
+  assert.equal(drainFailure(), null)
+})
+
+test('callFastModel — key set but no base url reports not_configured', () => {
+  assert.equal(callFastModel({ messages: [] }, { api_key: 'sk-x' }), null)
+  assert.deepEqual(drainFailure(), { reason: 'not_configured', detail: null })
 })

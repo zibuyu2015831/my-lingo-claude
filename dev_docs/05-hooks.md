@@ -185,7 +185,9 @@ function main() {
     }
     const result = callFastModel(buildPromptForRefine(prompt, config), config)
     if (!result) {
-      emit({ decision: 'block', reason: '[my-lingo] Refinement failed — API unavailable.' })
+      // drainFailure() 区分失败原因（timeout / unreachable / auth / …），生成精确提示
+      const { cause, hint } = classifyFailure(drainFailure(), config)
+      emit({ decision: 'block', reason: `[my-lingo] Refinement failed — ${cause}.${hint}` })
       return
     }
     writeTurn({ prompt, detection, sessionId, mode: 'refine', executionPrompt: result.execution_prompt_en, fallback: false }, config)
@@ -204,10 +206,12 @@ function main() {
   const latencyMs = Date.now() - startTime
   
   if (!result) {
-    // Fallback：API 不可用，透传原始 prompt
-    writeTurn({ prompt, detection, sessionId, mode: config.execution_mode, fallback: true, latencyMs }, config)
+    // Fallback：按失败原因分类（timeout / unreachable / auth / bad response / …），
+    // 透传原始 prompt 并写入对应 fallback_reason（api_timeout / api_unreachable / …）
+    const { fallbackReason, cause, hint } = classifyFailure(drainFailure(), config)
+    writeTurn({ prompt, detection, sessionId, mode: config.execution_mode, fallback: true, fallbackReason, latencyMs }, config)
     if (config.fallback_policy === 'send_original') {
-      emit({ systemMessage: '[my-lingo] API unavailable, sending original prompt.' })
+      emit({ systemMessage: `[my-lingo] ${capitalize(cause)} — sending original prompt.${hint}` })
     }
     return
   }

@@ -11,6 +11,44 @@ const COOLDOWN_MINUTES = 5
 // pending auth warning — drained on next emit()
 let _pendingWarning = null
 
+// Why the most recent callFastModel() returned null. The caller drains this to
+// build a precise fallback message + fallback_reason, instead of collapsing
+// every failure (timeout, dead host, bad key, garbage response) into the same
+// "API unavailable". Mirrors the _pendingWarning / drainWarning pattern.
+let _lastFailure = null
+
+function fail(reason, detail = null) {
+  _lastFailure = { reason, detail }
+  return null
+}
+
+// drainFailure: read + clear the reason the last callFastModel() returned null.
+// Returns null if the call succeeded (or nothing has been called yet).
+export function drainFailure() {
+  const f = _lastFailure
+  _lastFailure = null
+  return f
+}
+
+// Map a finished spawnSync('curl', …) result to a failure reason. The relevant
+// curl exit codes: 28 = operation timed out (--max-time), 6 = DNS failure and
+// 7 = connection refused (both "unreachable"), 35/60 = TLS handshake/cert. When
+// curl's own --max-time doesn't fire first, spawnSync's timeout backstop kills
+// it and surfaces as error.code === 'ETIMEDOUT'.
+export function classifyCurlFailure(result) {
+  if (result.error) {
+    return result.error.code === 'ETIMEDOUT' ? 'timeout' : 'unreachable'
+  }
+  switch (result.status) {
+    case 28: return 'timeout'
+    case 6:
+    case 7: return 'unreachable'
+    case 35:
+    case 60: return 'tls_error'
+    default: return 'api_error'
+  }
+}
+
 export function getApiKey(config) {
   return config?.api_key ?? null
 }
@@ -62,11 +100,11 @@ export function callFastModel(payload, config) {
   const apiKey = getApiKey(config)
   if (!apiKey) {
     process.stderr.write('[my-lingo] No API key configured. Run /my-lingo:setup\n')
-    return null
+    return fail('no_api_key')
   }
   if (!config.api_base_url || !config.model_fast) {
     process.stderr.write('[my-lingo] API not configured. Run /my-lingo:setup\n')
-    return null
+    return fail('not_configured')
   }
 
   const timeoutSec = config.timeout_seconds || 8
@@ -110,12 +148,18 @@ export function callFastModel(payload, config) {
     stderr_preview: (result.stderr || '').slice(0, 500),
   }, config)
 
-  if (result.error || result.status !== 0) return null
+  if (result.error || result.status !== 0) {
+    return fail(classifyCurlFailure(result), result.error?.message ?? `curl exit ${result.status}`)
+  }
 
   const parsed = parseModelResponse(result.stdout)
   if (!parsed) {
     debugLog('PARSE_ERROR', { stdout_preview: (result.stdout || '').slice(0, 500) }, config)
+    // parseModelResponse sets _pendingWarning when the body was an auth error;
+    // everything else here is a 200 with a body we couldn't make sense of.
+    return fail(_pendingWarning ? 'auth' : 'invalid_response')
   }
+  _lastFailure = null
   return parsed
 }
 
